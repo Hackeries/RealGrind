@@ -2,6 +2,8 @@ import { NextResponse } from "next/server"
 import { neon } from "@neondatabase/serverless"
 import { codeforcesAPI } from "@/lib/codeforces-api"
 
+export const dynamic = "force-dynamic"
+
 const sql = neon(process.env.DATABASE_URL!)
 
 export async function POST() {

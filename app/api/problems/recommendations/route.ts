@@ -5,6 +5,8 @@ import { neon } from "@neondatabase/serverless"
 
 const sql = neon(process.env.DATABASE_URL!)
 
+export const dynamic = "force-dynamic"
+
 interface RecommendationResult {
   id: string
   contest_id: string

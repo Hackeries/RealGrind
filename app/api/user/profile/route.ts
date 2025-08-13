@@ -5,6 +5,8 @@ import { neon } from "@neondatabase/serverless"
 
 const sql = neon(process.env.DATABASE_URL!)
 
+export const dynamic = "force-dynamic"
+
 export async function PUT(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
