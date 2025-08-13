@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server"
-import { neon } from "@neondatabase/serverless"
+import { getDb } from "@/lib/db"
 import { codeforcesAPI } from "@/lib/codeforces-api"
 
 export const dynamic = "force-dynamic"
-
-const sql = neon(process.env.DATABASE_URL!)
 
 export async function POST() {
   try {
@@ -21,6 +19,7 @@ export async function POST() {
     let syncedCount = 0
 
     // Insert/update problems in batches
+    const sql = getDb() // moved database connection inside request handler
     for (const problem of problems) {
       const problemId = `${problem.contestId || "problemset"}-${problem.index}`
       const solvedCount = statsMap.get(problemId) || 0

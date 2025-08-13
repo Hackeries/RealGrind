@@ -3,8 +3,6 @@ import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { neon } from "@neondatabase/serverless"
 
-const sql = neon(process.env.DATABASE_URL!)
-
 export const dynamic = "force-dynamic"
 
 const getFallbackCollegeRankings = () => [
@@ -60,6 +58,8 @@ const getFallbackCollegeRankings = () => [
 
 export async function GET(request: NextRequest) {
   try {
+    const sql = neon(process.env.DATABASE_URL!)
+
     const session = await getServerSession(authOptions)
     const { searchParams } = new URL(request.url)
     const sortBy = searchParams.get("sortBy") || "current_rating"

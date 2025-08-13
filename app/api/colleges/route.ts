@@ -1,12 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { neon } from "@neondatabase/serverless"
-
-const sql = neon(process.env.DATABASE_URL!)
+import { getDb } from "@/lib/db"
 
 export const dynamic = "force-dynamic"
 
 export async function GET(request: NextRequest) {
   try {
+    const sql = getDb()
+
     const { searchParams } = new URL(request.url)
     const search = searchParams.get("search") || ""
     const tier = searchParams.get("tier")

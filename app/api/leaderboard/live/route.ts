@@ -1,12 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { neon } from "@neondatabase/serverless"
 
-const sql = neon(process.env.DATABASE_URL!)
-
 export const dynamic = "force-dynamic"
 
 export async function GET(request: NextRequest) {
   try {
+    const sql = neon(process.env.DATABASE_URL!)
+
     const { searchParams } = new URL(request.url)
     const contestId = searchParams.get("contestId")
 

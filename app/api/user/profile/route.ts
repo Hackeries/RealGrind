@@ -1,9 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
-import { neon } from "@neondatabase/serverless"
-
-const sql = neon(process.env.DATABASE_URL!)
+import { getDb } from "@/lib/db"
 
 export const dynamic = "force-dynamic"
 
@@ -13,6 +11,8 @@ export async function PUT(request: NextRequest) {
     if (!session?.user?.email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
+
+    const sql = getDb()
 
     const { collegeId, graduationYear, codeforcesHandle } = await request.json()
 
@@ -42,6 +42,8 @@ export async function GET() {
     if (!session?.user?.email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
+
+    const sql = getDb()
 
     const user = await sql`
       SELECT 

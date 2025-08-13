@@ -1,9 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
-import { neon } from "@neondatabase/serverless"
-
-const sql = neon(process.env.DATABASE_URL!)
+import { getDb } from "@/lib/db"
 
 export const dynamic = "force-dynamic"
 
@@ -97,6 +95,7 @@ async function getFallbackRecommendations(): Promise<RecommendationResult[]> {
 async function getPersonalizedRecommendations(userId: string): Promise<RecommendationResult[]> {
   try {
     // Step 2: Query UserProblem table to get all problems the user has solved
+    const sql = getDb()
     const solvedProblems = await sql`
       SELECT DISTINCT p.id, p.tags, p.rating
       FROM user_submissions us

@@ -1,12 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
-import { neon } from "@neondatabase/serverless"
+import { getDb } from "@/lib/db"
 import { codeforcesAPI } from "@/lib/codeforces-api"
 
 export const dynamic = "force-dynamic"
-
-const sql = neon(process.env.DATABASE_URL!)
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,6 +12,8 @@ export async function POST(request: NextRequest) {
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
+
+    const sql = getDb()
 
     const { codeforcesHandle } = await request.json()
 

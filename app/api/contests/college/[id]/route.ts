@@ -5,10 +5,10 @@ import { neon } from "@neondatabase/serverless"
 
 export const dynamic = "force-dynamic"
 
-const sql = neon(process.env.DATABASE_URL!)
-
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
+    const sql = neon(process.env.DATABASE_URL!)
+
     const contestId = params.id
 
     // Get contest details
@@ -64,6 +64,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
+    const sql = neon(process.env.DATABASE_URL!)
+
     const session = await getServerSession(authOptions)
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })

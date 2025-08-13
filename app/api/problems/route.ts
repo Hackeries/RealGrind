@@ -1,9 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
-import { neon } from "@neondatabase/serverless"
-
-const sql = neon(process.env.DATABASE_URL!)
+import { getDb } from "@/lib/db"
 
 export const dynamic = "force-dynamic"
 
@@ -188,6 +186,8 @@ export async function GET(request: NextRequest) {
     let problems, availableTags
 
     try {
+      const sql = getDb()
+
       problems = await sql.unsafe(finalQuery, queryParams)
 
       // Get available tags

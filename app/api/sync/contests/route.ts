@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server"
-import { neon } from "@neondatabase/serverless"
+import { getDb } from "@/lib/db"
 import { codeforcesAPI } from "@/lib/codeforces-api"
 
 export const dynamic = "force-dynamic"
-
-const sql = neon(process.env.DATABASE_URL!)
 
 export async function POST() {
   try {
@@ -12,6 +10,8 @@ export async function POST() {
     const contests = await codeforcesAPI.getContests()
 
     let syncedCount = 0
+
+    const sql = getDb()
 
     // Insert/update contests
     for (const contest of contests) {

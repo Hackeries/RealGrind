@@ -3,10 +3,10 @@ import { neon } from "@neondatabase/serverless"
 
 export const dynamic = "force-dynamic"
 
-const sql = neon(process.env.DATABASE_URL!)
-
 export async function GET() {
   try {
+    const sql = neon(process.env.DATABASE_URL!)
+
     const states = await sql`
       SELECT DISTINCT state
       FROM colleges
