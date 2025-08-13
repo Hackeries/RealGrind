@@ -5,30 +5,27 @@ import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   Trophy,
   Target,
   TrendingUp,
   Code,
-  Award,
   Activity,
-  Settings,
-  ExternalLink,
   RefreshCw,
   AlertCircle,
+  Calendar,
+  Users,
+  Lightbulb,
+  ArrowRight,
 } from "lucide-react"
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell } from "recharts"
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface UserStats {
   user: {
+    name: string
     codeforcesHandle: string | null
     currentRating: number
     maxRating: number
@@ -37,39 +34,28 @@ interface UserStats {
     college: string | null
     graduationYear: number | null
   }
-  difficultyStats: Array<{
-    difficulty: string
-    solved_count: number
+  recentActivity: Array<{
+    type: string
+    description: string
+    timestamp: string
   }>
-  tagStats: Array<{
-    tag: string
-    solved_count: number
-  }>
-  recentSubmissions: Array<{
+  recommendations: Array<{
     problem_id: string
     problem_name: string
-    rating: number | null
-    verdict: string
-    programming_language: string
-    submitted_at: string
+    rating: number
+    tags: string[]
   }>
-  ratingHistory: Array<{
-    contest_id: string
-    old_rating: number
-    new_rating: number
+  upcomingContest: {
+    name: string
+    start_time: string
+    duration: number
+  } | null
+  leaderboardPreview: Array<{
     rank: number
-    participated_at: string
+    name: string
+    rating: number
+    problems_solved: number
   }>
-}
-
-const DIFFICULTY_COLORS = {
-  Unrated: "#6b7280",
-  Beginner: "#10b981",
-  Pupil: "#3b82f6",
-  Specialist: "#8b5cf6",
-  Expert: "#f59e0b",
-  "Candidate Master": "#ef4444",
-  "Master+": "#dc2626",
 }
 
 export default function DashboardPage() {
@@ -149,14 +135,14 @@ export default function DashboardPage() {
   }
 
   const getRatingColor = (rating: number) => {
-    if (rating < 1200) return "text-gray-600"
-    if (rating < 1400) return "text-green-600"
-    if (rating < 1600) return "text-cyan-600"
-    if (rating < 1900) return "text-blue-600"
-    if (rating < 2100) return "text-purple-600"
-    if (rating < 2300) return "text-yellow-600"
-    if (rating < 2400) return "text-orange-600"
-    return "text-red-600"
+    if (rating < 1200) return "text-gray-400"
+    if (rating < 1400) return "text-green-400"
+    if (rating < 1600) return "text-cyan-400"
+    if (rating < 1900) return "text-blue-400"
+    if (rating < 2100) return "text-purple-400"
+    if (rating < 2300) return "text-yellow-400"
+    if (rating < 2400) return "text-orange-400"
+    return "text-red-400"
   }
 
   const getRatingTitle = (rating: number) => {
@@ -172,10 +158,10 @@ export default function DashboardPage() {
 
   if (status === "loading" || loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-blue-900 flex items-center justify-center">
         <div className="text-center">
-          <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-600" />
-          <p className="text-gray-600">Loading your dashboard...</p>
+          <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-purple-400" />
+          <p className="text-gray-300">Loading your dashboard...</p>
         </div>
       </div>
     )
@@ -183,26 +169,23 @@ export default function DashboardPage() {
 
   if (error && !stats) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-blue-900">
         <div className="container mx-auto px-4 py-8">
           <div className="max-w-2xl mx-auto">
-            <Alert variant="destructive" className="mb-6">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-            <Card className="border-0 shadow-xl">
+            <Card className="bg-gray-800/50 border-red-500/50">
               <CardHeader className="text-center">
-                <CardTitle>Unable to Load Dashboard</CardTitle>
-                <CardDescription>
+                <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
+                <CardTitle className="text-white">Unable to Load Dashboard</CardTitle>
+                <CardDescription className="text-gray-300">
                   We're having trouble loading your data. This might be a temporary issue.
                 </CardDescription>
               </CardHeader>
               <CardContent className="text-center space-y-4">
-                <Button onClick={fetchStats} className="bg-gradient-to-r from-blue-600 to-purple-600">
+                <Button onClick={fetchStats} className="bg-gradient-to-r from-purple-600 to-cyan-600">
                   <RefreshCw className="w-4 h-4 mr-2" />
                   Try Again
                 </Button>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-400">
                   If the problem persists, please check your internet connection or try again later.
                 </p>
               </CardContent>
@@ -213,28 +196,29 @@ export default function DashboardPage() {
     )
   }
 
+  // If no Codeforces linked, prompt user to go to /onboarding
   if (!stats?.user.codeforcesHandle) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-blue-900">
         <div className="container mx-auto px-4 py-8">
           <div className="max-w-2xl mx-auto text-center">
-            <Card className="border-0 shadow-xl">
+            <Card className="bg-gray-800/50 border-purple-500/50">
               <CardHeader className="pb-8">
-                <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-cyan-500 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Code className="w-8 h-8 text-white" />
                 </div>
-                <CardTitle className="text-2xl">Welcome to RealGrind!</CardTitle>
-                <CardDescription className="text-lg">
+                <CardTitle className="text-2xl text-white">Welcome to RealGrind!</CardTitle>
+                <CardDescription className="text-lg text-gray-300">
                   Connect your Codeforces account to start tracking your competitive programming journey.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <Link href="/profile/setup">
-                  <Button size="lg" className="w-full bg-gradient-to-r from-blue-600 to-purple-600">
-                    Connect Codeforces Account
+                <Link href="/onboarding">
+                  <Button size="lg" className="w-full bg-gradient-to-r from-purple-600 to-cyan-600">
+                    Complete Setup
                   </Button>
                 </Link>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-400">
                   We'll sync your submissions, ratings, and contest history automatically.
                 </p>
               </CardContent>
@@ -245,48 +229,31 @@ export default function DashboardPage() {
     )
   }
 
-  const ratingChartData =
-    stats.ratingHistory.length > 0
-      ? stats.ratingHistory.map((entry, index) => ({
-          contest: index + 1,
-          rating: entry.new_rating,
-          date: new Date(entry.participated_at).toLocaleDateString(),
-        }))
-      : [{ contest: 1, rating: stats.user.currentRating, date: "Today" }]
-
-  const difficultyChartData =
-    stats.difficultyStats.length > 0
-      ? stats.difficultyStats.map((stat) => ({
-          name: stat.difficulty,
-          value: stat.solved_count,
-          color: DIFFICULTY_COLORS[stat.difficulty as keyof typeof DIFFICULTY_COLORS] || "#6b7280",
-        }))
-      : [{ name: "No data", value: 1, color: "#6b7280" }]
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-blue-900">
+      {/* Header */}
+      <header className="border-b border-gray-800 bg-gray-900/80 backdrop-blur-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <Link href="/" className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+              <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-cyan-500 rounded-lg flex items-center justify-center">
                 <Code className="w-5 h-5 text-white" />
               </div>
-              <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              <h1 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent">
                 RealGrind
               </h1>
             </Link>
             <nav className="hidden md:flex items-center space-x-6">
-              <Link href="/dashboard" className="text-blue-600 font-medium">
+              <Link href="/dashboard" className="text-purple-400 font-medium">
                 Dashboard
               </Link>
-              <Link href="/problems" className="text-gray-600 hover:text-blue-600">
+              <Link href="/problems" className="text-gray-300 hover:text-purple-400">
                 Problems
               </Link>
-              <Link href="/contests" className="text-gray-600 hover:text-blue-600">
+              <Link href="/contests" className="text-gray-300 hover:text-purple-400">
                 Contests
               </Link>
-              <Link href="/leaderboard" className="text-gray-600 hover:text-blue-600">
+              <Link href="/leaderboard" className="text-gray-300 hover:text-purple-400">
                 Leaderboard
               </Link>
             </nav>
@@ -297,371 +264,221 @@ export default function DashboardPage() {
               disabled={syncing}
               variant="outline"
               size="sm"
-              className="flex items-center space-x-2 bg-transparent"
+              className="border-gray-600 text-gray-300 hover:bg-gray-800 bg-transparent"
             >
-              <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
+              <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? "animate-spin" : ""}`} />
               <span>{syncing ? "Syncing..." : "Sync"}</span>
             </Button>
             <Avatar>
               <AvatarImage src={session?.user?.image || ""} />
-              <AvatarFallback>{session?.user?.name?.[0] || "U"}</AvatarFallback>
+              <AvatarFallback className="bg-gray-700 text-white">{session?.user?.name?.[0] || "U"}</AvatarFallback>
             </Avatar>
           </div>
         </div>
       </header>
 
       <div className="container mx-auto px-4 py-8">
+        {/* Personalized Welcome Message */}
         <div className="mb-8">
-          <Card className="border-0 shadow-lg bg-gradient-to-r from-blue-600 to-purple-600 text-white">
-            <CardContent className="p-8">
-              <div className="flex flex-col md:flex-row items-start md:items-center justify-between">
-                <div className="flex items-center space-x-6 mb-4 md:mb-0">
-                  <Avatar className="w-20 h-20 border-4 border-white/20">
-                    <AvatarImage src={session?.user?.image || ""} />
-                    <AvatarFallback className="text-2xl bg-white/20">{session?.user?.name?.[0] || "U"}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <h2 className="text-3xl font-bold mb-2">{session?.user?.name}</h2>
-                    <div className="flex items-center space-x-4 text-white/90">
-                      <span className="flex items-center space-x-1">
-                        <ExternalLink className="w-4 h-4" />
-                        <span>{stats.user.codeforcesHandle}</span>
-                      </span>
-                      {stats.user.college && (
-                        <span className="flex items-center space-x-1">
-                          <Award className="w-4 h-4" />
-                          <span>{stats.user.college}</span>
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className={`text-3xl font-bold ${getRatingColor(stats.user.currentRating)}`}>
-                    {stats.user.currentRating}
-                  </div>
-                  <div className="text-white/90">{getRatingTitle(stats.user.currentRating)}</div>
-                  <div className="text-sm text-white/70">Max: {stats.user.maxRating}</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <h2 className="text-4xl font-bold text-white mb-2">
+            Hey {session?.user?.name?.split(" ")[0]}, ready to climb the ranks?
+          </h2>
+          <p className="text-xl text-gray-300">Track your progress and compete with peers from your college</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <Card className="border-0 shadow-lg">
+        {/* Main Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          {/* Current Codeforces Rating */}
+          <Card className="bg-gray-800/50 border-purple-500/50">
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-600 mb-1">Problems Solved</p>
-                  <p className="text-3xl font-bold text-green-600">{stats.user.problemsSolved}</p>
-                </div>
-                <Target className="w-8 h-8 text-green-600" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-0 shadow-lg">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Contests</p>
-                  <p className="text-3xl font-bold text-blue-600">{stats.user.contestsParticipated}</p>
-                </div>
-                <Trophy className="w-8 h-8 text-blue-600" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-0 shadow-lg">
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">Current Rating</p>
+                  <p className="text-sm text-gray-400 mb-1">Current Codeforces Rating</p>
                   <p className={`text-3xl font-bold ${getRatingColor(stats.user.currentRating)}`}>
                     {stats.user.currentRating}
                   </p>
+                  <p className="text-sm text-gray-400">{getRatingTitle(stats.user.currentRating)}</p>
                 </div>
-                <TrendingUp className="w-8 h-8 text-purple-600" />
+                <TrendingUp className="w-8 h-8 text-purple-400" />
               </div>
             </CardContent>
           </Card>
 
-          <Card className="border-0 shadow-lg">
+          {/* Total Problems Solved */}
+          <Card className="bg-gray-800/50 border-green-500/50">
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-600 mb-1">Max Rating</p>
-                  <p className={`text-3xl font-bold ${getRatingColor(stats.user.maxRating)}`}>{stats.user.maxRating}</p>
+                  <p className="text-sm text-gray-400 mb-1">Total Problems Solved</p>
+                  <p className="text-3xl font-bold text-green-400">{stats.user.problemsSolved}</p>
+                  <p className="text-sm text-gray-400">Keep grinding!</p>
                 </div>
-                <Award className="w-8 h-8 text-orange-600" />
+                <Target className="w-8 h-8 text-green-400" />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Next Upcoming Contest */}
+          <Card className="bg-gray-800/50 border-cyan-500/50">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-400 mb-1">Next Upcoming Contest</p>
+                  {stats.upcomingContest ? (
+                    <>
+                      <p className="text-lg font-bold text-cyan-400 truncate">{stats.upcomingContest.name}</p>
+                      <p className="text-sm text-gray-400">
+                        {new Date(stats.upcomingContest.start_time).toLocaleDateString()}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-lg font-bold text-cyan-400">No upcoming contests</p>
+                      <p className="text-sm text-gray-400">Check back later</p>
+                    </>
+                  )}
+                </div>
+                <Calendar className="w-8 h-8 text-cyan-400" />
               </div>
             </CardContent>
           </Card>
         </div>
 
-        <Tabs defaultValue="progress" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="progress">Progress</TabsTrigger>
-            <TabsTrigger value="problems">Problems</TabsTrigger>
-            <TabsTrigger value="activity">Activity</TabsTrigger>
-            <TabsTrigger value="stats">Statistics</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="progress" className="space-y-6">
-            <Card className="border-0 shadow-lg">
-              <CardHeader>
-                <CardTitle className="flex items-center space-x-2">
-                  <TrendingUp className="w-5 h-5" />
-                  <span>Rating Progress</span>
-                </CardTitle>
-                <CardDescription>Your rating changes over time</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {stats.ratingHistory.length === 0 ? (
-                  <div className="h-[300px] flex items-center justify-center text-center">
-                    <div>
-                      <TrendingUp className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                      <p className="text-gray-600 mb-2">No contest history yet</p>
-                      <p className="text-sm text-gray-500">Participate in contests to see your rating progress</p>
-                    </div>
-                  </div>
-                ) : (
-                  <ChartContainer
-                    config={{
-                      rating: {
-                        label: "Rating",
-                        color: "hsl(var(--chart-1))",
-                      },
-                    }}
-                    className="h-[300px]"
+        {/* Main Sections */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Smart Recommendations */}
+          <Card className="bg-gray-800/50 border-gray-600">
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2 text-white">
+                <Lightbulb className="w-5 h-5 text-yellow-400" />
+                <span>Smart Recommendations</span>
+              </CardTitle>
+              <CardDescription className="text-gray-400">
+                Personalized problems based on your skill level
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {stats.recommendations && stats.recommendations.length > 0 ? (
+                stats.recommendations.slice(0, 5).map((problem, index) => (
+                  <div
+                    key={problem.problem_id}
+                    className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg"
                   >
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={ratingChartData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="contest" />
-                        <YAxis />
-                        <ChartTooltip content={<ChartTooltipContent />} />
-                        <Line
-                          type="monotone"
-                          dataKey="rating"
-                          stroke="var(--color-rating)"
-                          strokeWidth={2}
-                          dot={{ fill: "var(--color-rating)" }}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </ChartContainer>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+                    <div className="flex-1">
+                      <h4 className="font-medium text-white truncate">{problem.problem_name}</h4>
+                      <p className="text-sm text-gray-400">{problem.problem_id}</p>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Badge variant="outline" className={`${getRatingColor(problem.rating)} border-current`}>
+                        {problem.rating}
+                      </Badge>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8">
+                  <Lightbulb className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+                  <p className="text-gray-400 mb-2">No recommendations yet</p>
+                  <p className="text-sm text-gray-500">Solve more problems to get personalized suggestions</p>
+                </div>
+              )}
+              <Link href="/api/problems/recommendations">
+                <Button
+                  variant="outline"
+                  className="w-full border-gray-600 text-gray-300 hover:bg-gray-700 bg-transparent"
+                >
+                  View All Recommendations
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
 
-          <TabsContent value="problems" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card className="border-0 shadow-lg">
-                <CardHeader>
-                  <CardTitle>Problems by Difficulty</CardTitle>
-                  <CardDescription>Distribution of solved problems</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {stats.difficultyStats.length === 0 ? (
-                    <div className="h-[300px] flex items-center justify-center text-center">
+          {/* Recent Activity */}
+          <Card className="bg-gray-800/50 border-gray-600">
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2 text-white">
+                <Activity className="w-5 h-5 text-blue-400" />
+                <span>Recent Activity</span>
+              </CardTitle>
+              <CardDescription className="text-gray-400">Your latest competitive programming activity</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {stats.recentActivity && stats.recentActivity.length > 0 ? (
+                stats.recentActivity.slice(0, 5).map((activity, index) => (
+                  <div key={index} className="flex items-start space-x-3 p-3 bg-gray-700/50 rounded-lg">
+                    <div className="w-2 h-2 bg-blue-400 rounded-full mt-2 flex-shrink-0"></div>
+                    <div className="flex-1">
+                      <p className="text-sm text-white">{activity.description}</p>
+                      <p className="text-xs text-gray-400">{new Date(activity.timestamp).toLocaleDateString()}</p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8">
+                  <Activity className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+                  <p className="text-gray-400 mb-2">No recent activity</p>
+                  <p className="text-sm text-gray-500">Start solving problems to see your activity here</p>
+                </div>
+              )}
+              <Link href="/api/activities">
+                <Button
+                  variant="outline"
+                  className="w-full border-gray-600 text-gray-300 hover:bg-gray-700 bg-transparent"
+                >
+                  View All Activity
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
+
+          {/* Leaderboard Preview */}
+          <Card className="bg-gray-800/50 border-gray-600">
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2 text-white">
+                <Trophy className="w-5 h-5 text-orange-400" />
+                <span>Global Leaderboards</span>
+              </CardTitle>
+              <CardDescription className="text-gray-400">
+                See how you rank against other competitive programmers
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {stats.leaderboardPreview && stats.leaderboardPreview.length > 0 ? (
+                stats.leaderboardPreview.slice(0, 5).map((user, index) => (
+                  <div key={index} className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-8 h-8 bg-gradient-to-br from-orange-500 to-red-500 rounded-full flex items-center justify-center">
+                        <span className="text-white text-sm font-bold">{user.rank}</span>
+                      </div>
                       <div>
-                        <Target className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                        <p className="text-gray-600 mb-2">No problems solved yet</p>
-                        <p className="text-sm text-gray-500">Start solving problems to see your progress</p>
+                        <p className="font-medium text-white">{user.name}</p>
+                        <p className="text-sm text-gray-400">{user.problems_solved} problems</p>
                       </div>
                     </div>
-                  ) : (
-                    <ChartContainer
-                      config={{
-                        value: {
-                          label: "Problems",
-                        },
-                      }}
-                      className="h-[300px]"
-                    >
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={difficultyChartData}
-                            cx="50%"
-                            cy="50%"
-                            outerRadius={80}
-                            fill="#8884d8"
-                            dataKey="value"
-                            label={({ name, value }) => `${name}: ${value}`}
-                          >
-                            {difficultyChartData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} />
-                            ))}
-                          </Pie>
-                          <ChartTooltip content={<ChartTooltipContent />} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </ChartContainer>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card className="border-0 shadow-lg">
-                <CardHeader>
-                  <CardTitle>Top Problem Tags</CardTitle>
-                  <CardDescription>Your strongest areas</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {stats.tagStats.length === 0 ? (
-                    <div className="text-center py-8">
-                      <Code className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                      <p className="text-gray-600 mb-2">No problem tags yet</p>
-                      <p className="text-sm text-gray-500">Solve problems to discover your strengths</p>
-                    </div>
-                  ) : (
-                    stats.tagStats.slice(0, 8).map((tag, index) => (
-                      <div key={tag.tag} className="flex items-center justify-between">
-                        <span className="text-sm font-medium capitalize">{tag.tag.replace(/\s+/g, " ")}</span>
-                        <div className="flex items-center space-x-2">
-                          <Progress
-                            value={(tag.solved_count / stats.tagStats[0].solved_count) * 100}
-                            className="w-20"
-                          />
-                          <span className="text-sm text-gray-600 w-8">{tag.solved_count}</span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="activity" className="space-y-6">
-            <Card className="border-0 shadow-lg">
-              <CardHeader>
-                <CardTitle className="flex items-center space-x-2">
-                  <Activity className="w-5 h-5" />
-                  <span>Recent Submissions</span>
-                </CardTitle>
-                <CardDescription>Your latest problem-solving activity</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {stats.recentSubmissions.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Activity className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                    <p className="text-gray-600 mb-2">No recent submissions</p>
-                    <p className="text-sm text-gray-500 mb-4">Start solving problems to see your activity here</p>
-                    <Link href="/problems">
-                      <Button className="bg-gradient-to-r from-blue-600 to-purple-600">Browse Problems</Button>
-                    </Link>
+                    <div className={`text-sm font-medium ${getRatingColor(user.rating)}`}>{user.rating}</div>
                   </div>
-                ) : (
-                  <div className="space-y-4">
-                    {stats.recentSubmissions.map((submission, index) => (
-                      <div key={index} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                        <div className="flex-1">
-                          <h4 className="font-medium">{submission.problem_name}</h4>
-                          <p className="text-sm text-gray-600">
-                            {submission.problem_id} • {submission.programming_language}
-                          </p>
-                        </div>
-                        <div className="flex items-center space-x-4">
-                          {submission.rating && (
-                            <Badge variant="outline" className={getRatingColor(submission.rating)}>
-                              {submission.rating}
-                            </Badge>
-                          )}
-                          <Badge
-                            variant={submission.verdict === "OK" ? "default" : "destructive"}
-                            className={submission.verdict === "OK" ? "bg-green-100 text-green-800" : ""}
-                          >
-                            {submission.verdict}
-                          </Badge>
-                          <span className="text-sm text-gray-500">
-                            {new Date(submission.submitted_at).toLocaleDateString()}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="stats" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <Card className="border-0 shadow-lg">
-                <CardHeader>
-                  <CardTitle>Performance Summary</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex justify-between">
-                    <span>Success Rate</span>
-                    <span className="font-medium">
-                      {stats.recentSubmissions.length > 0
-                        ? Math.round(
-                            (stats.recentSubmissions.filter((s) => s.verdict === "OK").length /
-                              stats.recentSubmissions.length) *
-                              100,
-                          )
-                        : 0}
-                      %
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Average Rating</span>
-                    <span className="font-medium">
-                      {stats.ratingHistory.length > 0
-                        ? Math.round(
-                            stats.ratingHistory.reduce((sum, r) => sum + r.new_rating, 0) / stats.ratingHistory.length,
-                          )
-                        : 0}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Best Rank</span>
-                    <span className="font-medium">
-                      {stats.ratingHistory.length > 0 ? Math.min(...stats.ratingHistory.map((r) => r.rank)) : "N/A"}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-0 shadow-lg">
-                <CardHeader>
-                  <CardTitle>Account Info</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex justify-between">
-                    <span>Codeforces Handle</span>
-                    <span className="font-medium">{stats.user.codeforcesHandle}</span>
-                  </div>
-                  {stats.user.college && (
-                    <div className="flex justify-between">
-                      <span>College</span>
-                      <span className="font-medium">{stats.user.college}</span>
-                    </div>
-                  )}
-                  {stats.user.graduationYear && (
-                    <div className="flex justify-between">
-                      <span>Graduation Year</span>
-                      <span className="font-medium">{stats.user.graduationYear}</span>
-                    </div>
-                  )}
-                  <div className="pt-4">
-                    <Link href="/profile/setup">
-                      <Button variant="outline" size="sm" className="w-full bg-transparent">
-                        <Settings className="w-4 h-4 mr-2" />
-                        Edit Profile
-                      </Button>
-                    </Link>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-        </Tabs>
+                ))
+              ) : (
+                <div className="text-center py-8">
+                  <Users className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+                  <p className="text-gray-400 mb-2">No leaderboard data</p>
+                  <p className="text-sm text-gray-500">Check back later for rankings</p>
+                </div>
+              )}
+              <Link href="/api/leaderboard">
+                <Button
+                  variant="outline"
+                  className="w-full border-gray-600 text-gray-300 hover:bg-gray-700 bg-transparent"
+                >
+                  View Full Leaderboard
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   )
