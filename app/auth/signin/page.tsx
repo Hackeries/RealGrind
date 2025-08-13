@@ -23,14 +23,9 @@ export default function SignInPage() {
   const handleGoogleSignIn = async () => {
     try {
       setLoading(true)
-      const result = await signIn("google", {
+      await signIn("google", {
         callbackUrl: "/onboarding",
-        redirect: false,
       })
-
-      if (result?.ok) {
-        router.push("/onboarding")
-      }
     } catch (error) {
       console.error("Sign in error:", error)
     } finally {

@@ -5,241 +5,308 @@ import { getDb } from "@/lib/db"
 
 export const dynamic = "force-dynamic"
 
-const getFallbackProblems = () => [
-  {
-    id: "4A",
-    contest_id: "4",
-    index: "A",
-    name: "Watermelon",
-    type: "PROGRAMMING",
-    rating: 800,
-    tags: ["brute force", "implementation"],
-    solved_count: 50000,
-    is_solved: false,
-    difficulty_level: "Beginner",
-  },
-  {
-    id: "71A",
-    contest_id: "71",
-    index: "A",
-    name: "Way Too Long Words",
-    type: "PROGRAMMING",
-    rating: 800,
-    tags: ["strings", "implementation"],
-    solved_count: 45000,
-    is_solved: false,
-    difficulty_level: "Beginner",
-  },
-  {
-    id: "158A",
-    contest_id: "158",
-    index: "A",
-    name: "Next Round",
-    type: "PROGRAMMING",
-    rating: 800,
-    tags: ["implementation"],
-    solved_count: 40000,
-    is_solved: false,
-    difficulty_level: "Beginner",
-  },
-]
+interface RecommendationResult {
+  id: string
+  contest_id: string
+  index: string
+  name: string
+  type: string
+  rating: number | null
+  tags: string[]
+  solved_count: number
+  is_solved: boolean
+  difficulty_level: string
+  recommendation_score?: number
+  recommendation_reason?: string
+}
 
-const getFallbackTags = () => [
-  "implementation",
-  "math",
-  "greedy",
-  "strings",
-  "brute force",
-  "constructive algorithms",
-  "sortings",
-  "number theory",
-  "dp",
-  "graphs",
-]
+async function getFallbackRecommendations(): Promise<RecommendationResult[]> {
+  const fallbackProblems = [
+    {
+      id: "4A",
+      contest_id: "4",
+      index: "A",
+      name: "Watermelon",
+      type: "PROGRAMMING",
+      rating: 800,
+      tags: ["brute force", "implementation"],
+      solved_count: 50000,
+      is_solved: false,
+      difficulty_level: "Beginner",
+      recommendation_reason: "Perfect starting problem for beginners - simple logic and implementation.",
+    },
+    {
+      id: "71A",
+      contest_id: "71",
+      index: "A",
+      name: "Way Too Long Words",
+      type: "PROGRAMMING",
+      rating: 800,
+      tags: ["strings", "implementation"],
+      solved_count: 45000,
+      is_solved: false,
+      difficulty_level: "Beginner",
+      recommendation_reason: "Great for practicing string manipulation and basic programming concepts.",
+    },
+    {
+      id: "158A",
+      contest_id: "158",
+      index: "A",
+      name: "Next Round",
+      type: "PROGRAMMING",
+      rating: 800,
+      tags: ["implementation"],
+      solved_count: 40000,
+      is_solved: false,
+      difficulty_level: "Beginner",
+      recommendation_reason: "Excellent for learning conditional logic and problem-solving fundamentals.",
+    },
+    {
+      id: "231A",
+      contest_id: "231",
+      index: "A",
+      name: "Team",
+      type: "PROGRAMMING",
+      rating: 800,
+      tags: ["brute force", "greedy"],
+      solved_count: 35000,
+      is_solved: false,
+      difficulty_level: "Beginner",
+      recommendation_reason: "Simple counting problem that builds confidence in competitive programming.",
+    },
+    {
+      id: "282A",
+      contest_id: "282",
+      index: "A",
+      name: "Bit++",
+      type: "PROGRAMMING",
+      rating: 800,
+      tags: ["implementation"],
+      solved_count: 38000,
+      is_solved: false,
+      difficulty_level: "Beginner",
+      recommendation_reason: "Fun introduction to parsing and basic operations in competitive programming.",
+    },
+  ]
+
+  return fallbackProblems
+}
+
+async function getPersonalizedRecommendations(userId: string): Promise<RecommendationResult[]> {
+  try {
+    // Step 2: Query UserProblem table to get all problems the user has solved
+    const sql = getDb()
+    const solvedProblems = await sql`
+      SELECT DISTINCT p.id, p.tags, p.rating
+      FROM user_submissions us
+      JOIN problems p ON us.problem_id = p.id
+      WHERE us.user_id = ${userId} AND us.verdict = 'OK'
+    `
+
+    if (solvedProblems.length === 0) {
+      try {
+        const randomProblems = await sql`
+          SELECT p.id, p.contest_id, p.index, p.name, p.type, p.rating, p.tags, p.solved_count,
+                 false as is_solved,
+                 CASE 
+                   WHEN p.rating IS NULL THEN 'Unrated'
+                   WHEN p.rating < 1200 THEN 'Beginner'
+                   WHEN p.rating < 1600 THEN 'Pupil'
+                   WHEN p.rating < 1900 THEN 'Specialist'
+                   WHEN p.rating < 2100 THEN 'Expert'
+                   WHEN p.rating < 2400 THEN 'Candidate Master'
+                   ELSE 'Master+'
+                 END as difficulty_level
+          FROM problems p
+          WHERE p.rating BETWEEN 800 AND 1400
+          ORDER BY RANDOM()
+          LIMIT 5
+        `
+
+        if (randomProblems.length === 0) {
+          return await getFallbackRecommendations()
+        }
+
+        return randomProblems.map((p: any) => ({
+          ...p,
+          recommendation_reason: "Great starting problem to build your competitive programming skills!",
+        }))
+      } catch (dbError) {
+        console.error("Database error in recommendations fallback:", dbError)
+        return await getFallbackRecommendations()
+      }
+    }
+
+    // Step 3: From solved problems, find most frequent tags and calculate median difficulty
+    const allTags = solvedProblems.flatMap((p) => p.tags || [])
+    const tagCounts = allTags.reduce(
+      (acc, tag) => {
+        acc[tag] = (acc[tag] || 0) + 1
+        return acc
+      },
+      {} as Record<string, number>,
+    )
+
+    const frequentTags = Object.entries(tagCounts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 3)
+      .map(([tag]) => tag)
+
+    const ratings = solvedProblems
+      .map((p) => p.rating)
+      .filter((r) => r != null)
+      .sort((a, b) => a - b)
+    const medianDifficulty = ratings.length > 0 ? ratings[Math.floor(ratings.length / 2)] : 1200
+
+    // Step 4: Select problems from Problem table that are unsolved by this user
+    const candidateProblems = await sql`
+      SELECT p.id, p.contest_id, p.index, p.name, p.type, p.rating, p.tags, p.solved_count,
+             false as is_solved,
+             CASE 
+               WHEN p.rating IS NULL THEN 'Unrated'
+               WHEN p.rating < 1200 THEN 'Beginner'
+               WHEN p.rating < 1600 THEN 'Pupil'
+               WHEN p.rating < 1900 THEN 'Specialist'
+               WHEN p.rating < 2100 THEN 'Expert'
+               WHEN p.rating < 2400 THEN 'Candidate Master'
+               ELSE 'Master+'
+             END as difficulty_level
+      FROM problems p
+      WHERE p.id NOT IN (
+        SELECT DISTINCT us.problem_id 
+        FROM user_submissions us 
+        WHERE us.user_id = ${userId} AND us.verdict = 'OK'
+      )
+      AND p.rating IS NOT NULL
+      AND p.rating BETWEEN ${medianDifficulty - 200} AND ${medianDifficulty + 200}
+    `
+
+    if (candidateProblems.length === 0) {
+      try {
+        const backupProblems = await sql`
+          SELECT p.id, p.contest_id, p.index, p.name, p.type, p.rating, p.tags, p.solved_count,
+                 false as is_solved,
+                 CASE 
+                   WHEN p.rating IS NULL THEN 'Unrated'
+                   WHEN p.rating < 1200 THEN 'Beginner'
+                   WHEN p.rating < 1600 THEN 'Pupil'
+                   WHEN p.rating < 1900 THEN 'Specialist'
+                   WHEN p.rating < 2100 THEN 'Expert'
+                   WHEN p.rating < 2400 THEN 'Candidate Master'
+                   ELSE 'Master+'
+                 END as difficulty_level
+          FROM problems p
+          WHERE p.id NOT IN (
+            SELECT DISTINCT us.problem_id 
+            FROM user_submissions us 
+            WHERE us.user_id = ${userId} AND us.verdict = 'OK'
+          )
+          AND p.rating BETWEEN ${Math.max(800, medianDifficulty - 400)} AND ${medianDifficulty + 400}
+          ORDER BY RANDOM()
+          LIMIT 5
+        `
+
+        if (backupProblems.length === 0) {
+          return await getFallbackRecommendations()
+        }
+
+        return backupProblems.map((p: any) => ({
+          ...p,
+          recommendation_reason: "Challenging problem to help you grow your skills in new areas!",
+        }))
+      } catch (dbError) {
+        console.error("Database error in backup recommendations:", dbError)
+        return await getFallbackRecommendations()
+      }
+    }
+
+    // Step 5: Filter and score problems
+    const scoredProblems = candidateProblems
+      .map((problem: any) => {
+        const problemTags = problem.tags || []
+        const tagMatches = problemTags.filter((tag: string) => frequentTags.includes(tag)).length
+        const tagMatchScore = tagMatches / Math.max(frequentTags.length, 1)
+
+        let recommendationReason = "Good practice problem for your skill level."
+        if (tagMatches > 0) {
+          const matchedTags = problemTags.filter((tag: string) => frequentTags.includes(tag))
+          recommendationReason = `Perfect for practicing ${matchedTags.slice(0, 2).join(" and ")} - areas where you've shown strength!`
+        }
+
+        return {
+          ...problem,
+          tagMatchScore,
+          hasFrequentTag: tagMatches > 0,
+          difficultyInRange: Math.abs(problem.rating - medianDifficulty) <= 200,
+          recommendation_reason: recommendationReason,
+        }
+      })
+      .filter((p: any) => p.hasFrequentTag && p.difficultyInRange)
+
+    // Step 6: Order by tag match score, then random shuffle within score groups
+    const sortedProblems = scoredProblems.sort((a: any, b: any) => {
+      if (b.tagMatchScore !== a.tagMatchScore) {
+        return b.tagMatchScore - a.tagMatchScore
+      }
+      return Math.random() - 0.5 // Random shuffle for same scores
+    })
+
+    // Step 7: Limit to 5 problems and ensure we have some recommendations
+    const finalProblems = sortedProblems.slice(0, 5)
+
+    if (finalProblems.length === 0) {
+      return await getFallbackRecommendations()
+    }
+
+    return finalProblems
+  } catch (error) {
+    console.error("Error in getPersonalizedRecommendations:", error)
+    return await getFallbackRecommendations()
+  }
+}
 
 export async function GET(request: NextRequest) {
   try {
+    // Step 1: Authenticate user with NextAuth
     const session = await getServerSession(authOptions)
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const { searchParams } = new URL(request.url)
-    const difficulty = searchParams.get("difficulty") || "all"
-    const tags = searchParams.get("tags")?.split(",").filter(Boolean) || []
-    const minRating = Number.parseInt(searchParams.get("minRating") || "800")
-    const maxRating = Number.parseInt(searchParams.get("maxRating") || "3500")
-    const solved = searchParams.get("solved") || "all"
-    const search = searchParams.get("search") || ""
-    const limit = Number.parseInt(searchParams.get("limit") || "50")
-
-    // Build the WHERE clause
-    const whereConditions = ["p.rating IS NOT NULL"]
-    const queryParams: any[] = []
-    let paramIndex = 1
-
-    // Rating filter
-    whereConditions.push(`p.rating >= $${paramIndex}`)
-    queryParams.push(minRating)
-    paramIndex++
-
-    whereConditions.push(`p.rating <= $${paramIndex}`)
-    queryParams.push(maxRating)
-    paramIndex++
-
-    // Difficulty filter
-    if (difficulty !== "all") {
-      let difficultyRange: [number, number]
-      switch (difficulty) {
-        case "Beginner":
-          difficultyRange = [800, 1199]
-          break
-        case "Pupil":
-          difficultyRange = [1200, 1599]
-          break
-        case "Specialist":
-          difficultyRange = [1600, 1899]
-          break
-        case "Expert":
-          difficultyRange = [1900, 2099]
-          break
-        case "Candidate Master":
-          difficultyRange = [2100, 2399]
-          break
-        case "Master+":
-          difficultyRange = [2400, 5000]
-          break
-        default:
-          difficultyRange = [800, 5000]
-      }
-
-      whereConditions.push(`p.rating >= $${paramIndex}`)
-      queryParams.push(difficultyRange[0])
-      paramIndex++
-
-      whereConditions.push(`p.rating <= $${paramIndex}`)
-      queryParams.push(difficultyRange[1])
-      paramIndex++
-    }
-
-    // Tags filter
-    if (tags.length > 0) {
-      whereConditions.push(`p.tags && $${paramIndex}`)
-      queryParams.push(tags)
-      paramIndex++
-    }
-
-    // Search filter
-    if (search) {
-      whereConditions.push(`(p.name ILIKE $${paramIndex} OR p.id ILIKE $${paramIndex})`)
-      queryParams.push(`%${search}%`)
-      paramIndex++
-    }
-
-    // Build the main query
-    const baseQuery = `
-      SELECT 
-        p.id,
-        p.contest_id,
-        p.index,
-        p.name,
-        p.type,
-        p.rating,
-        p.tags,
-        p.solved_count,
-        CASE 
-          WHEN us.problem_id IS NOT NULL AND us.verdict = 'OK' THEN true
-          ELSE false
-        END as is_solved,
-        CASE 
-          WHEN p.rating IS NULL THEN 'Unrated'
-          WHEN p.rating < 1200 THEN 'Beginner'
-          WHEN p.rating < 1600 THEN 'Pupil'
-          WHEN p.rating < 1900 THEN 'Specialist'
-          WHEN p.rating < 2100 THEN 'Expert'
-          WHEN p.rating < 2400 THEN 'Candidate Master'
-          ELSE 'Master+'
-        END as difficulty_level
-      FROM problems p
-      LEFT JOIN (
-        SELECT DISTINCT problem_id, verdict
-        FROM user_submissions
-        WHERE user_id = $${paramIndex} AND verdict = 'OK'
-      ) us ON p.id = us.problem_id
-      WHERE ${whereConditions.join(" AND ")}
-    `
-
-    queryParams.push(session.user.id)
-    paramIndex++
-
-    // Solved filter
-    let finalQuery = baseQuery
-    if (solved === "solved") {
-      finalQuery += " AND us.problem_id IS NOT NULL"
-    } else if (solved === "unsolved") {
-      finalQuery += " AND us.problem_id IS NULL"
-    }
-
-    finalQuery += ` ORDER BY p.rating ASC, p.solved_count DESC LIMIT $${paramIndex}`
-    queryParams.push(limit)
-
-    let problems, availableTags
-
-    try {
-      const sql = getDb()
-
-      problems = await sql.unsafe(finalQuery, queryParams)
-
-      // Get available tags
-      const tagsResult = await sql`
-        SELECT DISTINCT UNNEST(tags) as tag
-        FROM problems
-        WHERE rating IS NOT NULL
-        ORDER BY tag
-        LIMIT 50
-      `
-
-      availableTags = tagsResult.map((row: any) => row.tag)
-    } catch (dbError) {
-      console.error("Database error in problems API:", dbError)
-      problems = getFallbackProblems()
-      availableTags = getFallbackTags()
-    }
-
-    if (problems.length === 0 && search === "" && tags.length === 0) {
-      // No problems found with current filters, provide fallback
-      problems = getFallbackProblems().filter((p) => p.rating >= minRating && p.rating <= maxRating)
-    }
+    const recommendations = await getPersonalizedRecommendations(session.user.id)
 
     return NextResponse.json({
-      problems,
-      availableTags,
-      count: problems.length,
-      filters: {
-        difficulty,
-        tags,
-        minRating,
-        maxRating,
-        solved,
-        search,
-      },
+      recommendations,
+      count: recommendations.length,
+      personalized: recommendations.some((r) => r.recommendation_reason?.includes("strength")),
       message:
-        problems.length > 0
-          ? "Problems loaded successfully"
-          : "No problems match your current filters. Try adjusting your search criteria.",
+        recommendations.length > 0
+          ? "Recommendations generated successfully"
+          : "Using fallback recommendations - solve more problems for better personalization",
     })
   } catch (error) {
-    console.error("Problems fetch error:", error)
+    console.error("Recommendations API error:", error)
 
-    return NextResponse.json(
-      {
-        problems: getFallbackProblems(),
-        availableTags: getFallbackTags(),
-        count: getFallbackProblems().length,
-        error: "Temporary service issue - showing sample problems",
-        message: "Service temporarily unavailable, showing fallback data",
-      },
-      { status: 200 },
-    ) // Return 200 with fallback data instead of 500
+    try {
+      const fallbackRecommendations = await getFallbackRecommendations()
+      return NextResponse.json({
+        recommendations: fallbackRecommendations,
+        count: fallbackRecommendations.length,
+        personalized: false,
+        message: "Using fallback recommendations due to temporary issues",
+        error: "Temporary service issue - showing default recommendations",
+      })
+    } catch (fallbackError) {
+      console.error("Fallback recommendations failed:", fallbackError)
+      return NextResponse.json(
+        {
+          error: "Service temporarily unavailable",
+          recommendations: [],
+          count: 0,
+          personalized: false,
+        },
+        { status: 500 },
+      )
+    }
   }
 }
