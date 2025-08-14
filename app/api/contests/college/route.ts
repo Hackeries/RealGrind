@@ -1,35 +1,26 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/lib/auth"
-import { neon } from "@neondatabase/serverless"
+import { getServerSession } from "@/lib/auth"
+import { createServerComponentClient } from "@supabase/auth-helpers-nextjs"
+import { cookies } from "next/headers"
 
 export const dynamic = "force-dynamic"
 
 export async function GET() {
   try {
-    const sql = neon(process.env.DATABASE_URL!)
+    const supabase = createServerComponentClient({ cookies })
 
-    const contests = await sql`
-      SELECT 
-        cc.id,
-        cc.name,
-        cc.college,
-        cc.description,
-        cc.start_time,
-        cc.end_time,
-        cc.created_by,
-        cc.is_active,
-        cc.created_at,
-        u.name as creator_name,
-        COUNT(ccp.user_id) as participant_count
-      FROM college_contests cc
-      LEFT JOIN users u ON cc.created_by = u.id
-      LEFT JOIN college_contest_participants ccp ON cc.id = ccp.contest_id
-      GROUP BY cc.id, u.name
-      ORDER BY cc.created_at DESC
-    `
+    const { data: contests, error } = await supabase
+      .from("college_contests")
+      .select(`
+        *,
+        users!college_contests_created_by_fkey (name),
+        college_contest_participants (count)
+      `)
+      .order("created_at", { ascending: false })
 
-    return NextResponse.json({ contests })
+    if (error) throw error
+
+    return NextResponse.json({ contests: contests || [] })
   } catch (error) {
     console.error("College contests fetch error:", error)
     return NextResponse.json(
@@ -41,13 +32,12 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const sql = neon(process.env.DATABASE_URL!)
-
-    const session = await getServerSession(authOptions)
-    if (!session?.user?.id) {
+    const session = await getServerSession()
+    if (!session?.user?.email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
+    const supabase = createServerComponentClient({ cookies })
     const { name, description, college, startTime, endTime } = await request.json()
 
     if (!name || !college || !startTime || !endTime) {
@@ -65,30 +55,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Start time must be in the future" }, { status: 400 })
     }
 
-    const result = await sql`
-      INSERT INTO college_contests (
-        name, college, description, start_time, end_time, created_by
-      ) VALUES (
-        ${name}, ${college}, ${description || null}, ${startTime}, ${endTime}, ${session.user.id}
-      )
-      RETURNING id
-    `
+    // Get user ID
+    const { data: user } = await supabase.from("users").select("id").eq("email", session.user.email).single()
 
-    // Create activity for contest creation
-    await sql`
-      INSERT INTO activities (user_id, type, title, description, metadata)
-      VALUES (
-        ${session.user.id},
-        'contest_created',
-        'Created College Contest',
-        ${`Created "${name}" for ${college}`},
-        ${JSON.stringify({ contestId: result[0].id, name, college })}
-      )
-    `
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 })
+    }
+
+    const { data: result, error } = await supabase
+      .from("college_contests")
+      .insert({
+        name,
+        college,
+        description: description || null,
+        start_time: startTime,
+        end_time: endTime,
+        created_by: user.id,
+      })
+      .select("id")
+      .single()
+
+    if (error) throw error
 
     return NextResponse.json({
       success: true,
-      contestId: result[0].id,
+      contestId: result.id,
       message: "Contest created successfully",
     })
   } catch (error) {

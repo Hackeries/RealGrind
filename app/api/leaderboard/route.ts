@@ -1,66 +1,142 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { neon } from "@neondatabase/serverless"
+import { prisma } from "@/lib/prisma"
+import { CacheManager } from "@/lib/redis"
+import { z } from "zod"
+
+const LeaderboardSchema = z.object({
+  type: z.enum(["college", "state", "national", "friends"]).default("national"),
+  collegeId: z.coerce.number().optional(),
+  state: z.string().optional(),
+  userId: z.string().optional(),
+  limit: z.coerce.number().min(1).max(100).default(50),
+  offset: z.coerce.number().min(0).default(0),
+})
 
 export const dynamic = "force-dynamic"
 
 export async function GET(request: NextRequest) {
   try {
-    const sql = neon(process.env.DATABASE_URL!)
-
     const { searchParams } = new URL(request.url)
-    const contestId = searchParams.get("contestId")
+    const params = LeaderboardSchema.parse(Object.fromEntries(searchParams))
 
-    if (!contestId) {
-      return NextResponse.json({ error: "Contest ID is required" }, { status: 400 })
+    // Generate cache key based on parameters
+    const cacheKey = `leaderboard:${params.type}:${params.collegeId || "all"}:${params.state || "all"}:${params.limit}:${params.offset}`
+
+    // Check cache first
+    const cached = await CacheManager.get<any>(cacheKey)
+    if (cached) {
+      return NextResponse.json({ ...cached, cached: true })
     }
 
-    // Get live contest standings
-    const standings = await sql`
-      SELECT 
-        ccp.user_id,
-        ccp.score,
-        ccp.rank,
-        ccp.joined_at,
-        u.name,
-        u.codeforces_handle,
-        u.current_rating,
-        u.avatar_url,
-        ROW_NUMBER() OVER (ORDER BY ccp.score DESC, ccp.joined_at ASC) as live_rank
-      FROM college_contest_participants ccp
-      JOIN users u ON ccp.user_id = u.id
-      WHERE ccp.contest_id = ${contestId}
-      ORDER BY ccp.score DESC, ccp.joined_at ASC
-    `
-
-    // Get contest info
-    const contest = await sql`
-      SELECT 
-        cc.id,
-        cc.name,
-        cc.college,
-        cc.start_time,
-        cc.end_time,
-        cc.is_active,
-        COUNT(ccp.user_id) as participant_count
-      FROM college_contests cc
-      LEFT JOIN college_contest_participants ccp ON cc.id = ccp.contest_id
-      WHERE cc.id = ${contestId}
-      GROUP BY cc.id
-    `
-
-    if (contest.length === 0) {
-      return NextResponse.json({ error: "Contest not found" }, { status: 404 })
+    const whereClause: any = {
+      codeforcesHandle: { not: null },
+      rating: { gt: 0 },
     }
 
-    return NextResponse.json({
-      contest: contest[0],
-      standings,
-      lastUpdated: new Date().toISOString(),
-    })
+    // Apply filters based on type
+    switch (params.type) {
+      case "college":
+        if (params.collegeId) {
+          whereClause.collegeId = params.collegeId
+        }
+        break
+      case "state":
+        if (params.state) {
+          whereClause.college = {
+            state: { equals: params.state, mode: "insensitive" },
+          }
+        }
+        break
+      case "friends":
+        if (params.userId) {
+          // Get user's friends
+          const friendships = await prisma.friendship.findMany({
+            where: {
+              OR: [{ userId: params.userId }, { friendId: params.userId }],
+            },
+          })
+
+          const friendIds = friendships.map((f) => (f.userId === params.userId ? f.friendId : f.userId))
+          friendIds.push(params.userId) // Include self
+
+          whereClause.id = { in: friendIds }
+        }
+        break
+      // national - no additional filters
+    }
+
+    const [leaderboard, total] = await Promise.all([
+      prisma.user.findMany({
+        where: whereClause,
+        select: {
+          id: true,
+          name: true,
+          codeforcesHandle: true,
+          rating: true,
+          college: {
+            select: {
+              id: true,
+              name: true,
+              state: true,
+              city: true,
+              tier: true,
+            },
+          },
+        },
+        orderBy: { rating: "desc" },
+        take: params.limit,
+        skip: params.offset,
+      }),
+      prisma.user.count({ where: whereClause }),
+    ])
+
+    // Get recent activity for each user (simplified)
+    const enrichedLeaderboard = await Promise.all(
+      leaderboard.map(async (user, index) => {
+        // Get recent submissions count (mock data for now)
+        const recentActivity = {
+          recentSubmissions: Math.floor(Math.random() * 20),
+          recentSolved: Math.floor(Math.random() * 10),
+          lastActive: Date.now() - Math.floor(Math.random() * 7 * 24 * 60 * 60 * 1000), // Random within last week
+        }
+
+        return {
+          rank: params.offset + index + 1,
+          id: user.id,
+          name: user.name || "Anonymous",
+          handle: user.codeforcesHandle || "",
+          rating: user.rating || 0,
+          college: user.college,
+          problemsSolved: Math.floor((user.rating || 0) / 5), // Rough estimate
+          recentActivity,
+        }
+      }),
+    )
+
+    const result = {
+      leaderboard: enrichedLeaderboard,
+      pagination: {
+        total,
+        limit: params.limit,
+        offset: params.offset,
+        hasMore: params.offset + params.limit < total,
+      },
+      type: params.type,
+      filters: {
+        collegeId: params.collegeId,
+        state: params.state,
+        userId: params.userId,
+      },
+    }
+
+    // Cache for 5 minutes
+    await CacheManager.set(cacheKey, result, { ttl: 300 })
+
+    return NextResponse.json(result)
   } catch (error) {
-    console.error("Live leaderboard fetch error:", error)
+    console.error("Leaderboard API error:", error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to fetch live standings" },
+      { error: error instanceof Error ? error.message : "Failed to fetch leaderboard" },
       { status: 500 },
     )
   }

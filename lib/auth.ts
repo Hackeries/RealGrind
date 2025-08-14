@@ -1,11 +1,11 @@
 import type { NextAuthOptions } from "next-auth"
 import GoogleProvider from "next-auth/providers/google"
+import { PrismaAdapter } from "@next-auth/prisma-adapter"
+import { prisma } from "@/lib/prisma"
+import { UserRole } from "@prisma/client"
 
 export const authOptions: NextAuthOptions = {
-  secret: process.env.NEXTAUTH_SECRET || "fallback-secret-for-development",
-  session: {
-    strategy: "jwt",
-  },
+  adapter: PrismaAdapter(prisma),
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -13,32 +13,76 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
-    async signIn({ user, account }) {
-      // Simple validation - just check if it's a Google account with email
-      if (account?.provider === "google" && user.email) {
-        return true
-      }
-      return false
-    },
-    async session({ session, token }) {
-      // Basic session setup without database operations
-      if (session.user && token.sub) {
-        session.user.id = token.sub
+    async session({ session, user }) {
+      if (session.user) {
+        // Fetch user with role from database
+        const dbUser = await prisma.user.findUnique({
+          where: { id: user.id },
+          include: { college: true },
+        })
+
+        session.user.id = user.id
+        session.user.role = dbUser?.role || UserRole.student
+        session.user.codeforcesHandle = dbUser?.codeforcesHandle
+        session.user.college = dbUser?.college
+        session.user.rating = dbUser?.rating
       }
       return session
     },
-    async jwt({ token, user }) {
-      // Simple JWT handling without database operations
-      if (user) {
-        token.sub = user.id
-      }
-      return token
+    async redirect({ url, baseUrl }) {
+      // Handle role-based redirects after sign in
+      if (url.startsWith("/")) return `${baseUrl}${url}`
+      if (new URL(url).origin === baseUrl) return url
+      return baseUrl
     },
   },
   pages: {
     signIn: "/auth/signin",
-    error: "/auth/error",
+    newUser: "/onboarding",
   },
-  trustHost: true,
-  debug: process.env.NODE_ENV === "development",
+  session: {
+    strategy: "database",
+  },
+}
+
+// Server-side helpers
+export async function getServerSession() {
+  const { getServerSession: nextAuthGetServerSession } = await import("next-auth")
+  const session = await nextAuthGetServerSession(authOptions)
+  return session
+}
+
+export async function getCurrentUser() {
+  const session = await getServerSession()
+  return session?.user || null
+}
+
+export async function requireAuth() {
+  const user = await getCurrentUser()
+  if (!user) {
+    throw new Error("Authentication required")
+  }
+  return user
+}
+
+export async function requireRole(allowedRoles: UserRole[]) {
+  const user = await requireAuth()
+  if (!allowedRoles.includes(user.role)) {
+    throw new Error("Insufficient permissions")
+  }
+  return user
+}
+
+// Role-based redirect logic
+export function getRoleBasedRedirect(role: UserRole): string {
+  switch (role) {
+    case UserRole.student:
+      return "/dashboard/student"
+    case UserRole.organizer:
+      return "/dashboard/organizer"
+    case UserRole.admin:
+      return "/dashboard/admin"
+    default:
+      return "/onboarding"
+  }
 }

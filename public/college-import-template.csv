@@ -1,0 +1,11 @@
+name,state,city,tier,affiliation,website,logoUrl
+Indian Institute of Technology Delhi,Delhi,New Delhi,T1,AUTONOMOUS,https://home.iitd.ac.in,
+Indian Institute of Technology Bombay,Maharashtra,Mumbai,T1,AUTONOMOUS,https://www.iitb.ac.in,
+Indian Institute of Technology Kanpur,Uttar Pradesh,Kanpur,T1,AUTONOMOUS,https://www.iitk.ac.in,
+National Institute of Technology Trichy,Tamil Nadu,Tiruchirappalli,T1,AICTE,https://www.nitt.edu,
+Delhi Technological University,Delhi,New Delhi,T2,AICTE,https://www.dtu.ac.in,
+Netaji Subhas University of Technology,Delhi,New Delhi,T2,AICTE,https://www.nsut.ac.in,
+Birla Institute of Technology and Science Pilani,Rajasthan,Pilani,T1,PRIVATE,https://www.bits-pilani.ac.in,
+Vellore Institute of Technology,Tamil Nadu,Vellore,T2,PRIVATE,https://vit.ac.in,
+Manipal Institute of Technology,Karnataka,Manipal,T2,PRIVATE,https://manipal.edu,
+SRM Institute of Science and Technology,Tamil Nadu,Chennai,T2,PRIVATE,https://www.srmist.edu.in

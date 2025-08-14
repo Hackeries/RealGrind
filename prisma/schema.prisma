@@ -1,0 +1,271 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// Enums
+enum Role {
+  student
+  organizer
+  admin
+}
+
+enum CollegeTier {
+  T1
+  T2
+  T3
+  Other
+}
+
+enum ContestType {
+  college
+  national
+}
+
+enum ContestVisibility {
+  public
+  private
+  invite
+}
+
+enum ContestStatus {
+  upcoming
+  ongoing
+  completed
+}
+
+enum Platform {
+  codeforces
+  atcoder
+  custom
+}
+
+enum SubmissionStatus {
+  AC
+  WA
+  TLE
+  MLE
+  RE
+  CE
+}
+
+enum CollegeRequestStatus {
+  pending
+  approved
+  rejected
+}
+
+// Models
+model User {
+  id                String    @id @default(dbgenerated("auth.uid()")) @db.Uuid
+  email             String    @unique
+  name              String?
+  avatarUrl         String?
+  role              Role      @default(student)
+  codeforcesHandle  String?   @unique
+  collegeId         Int?
+  rating            Int       @default(0)
+  bio               String?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  college           College?  @relation(fields: [collegeId], references: [id])
+  createdContests   Contest[] @relation("ContestCreator")
+  submissions       Submission[]
+  participations    ContestParticipant[]
+  friendships       Friendship[] @relation("UserFriendships")
+  friendOf          Friendship[] @relation("FriendOf")
+  stats             UserStats[]
+  collegeRequests   CollegeRequest[]
+  verifications     CodeforcesVerification[]
+
+  @@map("users")
+}
+
+model College {
+  id          Int         @id @default(autoincrement())
+  name        String
+  slug        String      @unique
+  state       String
+  city        String
+  tier        CollegeTier @default(Other)
+  affiliation String?     // AICTE/UGC/Private
+  website     String?
+  logoUrl     String?
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  users       User[]
+  contests    Contest[]
+  requests    CollegeRequest[]
+
+  @@index([state, tier])
+  @@map("colleges")
+}
+
+model Contest {
+  id          Int               @id @default(autoincrement())
+  title       String
+  description String?
+  type        ContestType       @default(college)
+  visibility  ContestVisibility @default(public)
+  status      ContestStatus     @default(upcoming)
+  startTime   DateTime          @map("start_time")
+  endTime     DateTime          @map("end_time")
+  collegeId   Int?              @map("college_id")
+  createdBy   String            @map("created_by") @db.Uuid
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  // Relations
+  college      College?             @relation(fields: [collegeId], references: [id])
+  creator      User                 @relation("ContestCreator", fields: [createdBy], references: [id])
+  problems     Problem[]
+  participants ContestParticipant[]
+  submissions  Submission[]
+
+  @@index([startTime, endTime, type, status])
+  @@map("contests")
+}
+
+model Problem {
+  id         Int      @id @default(autoincrement())
+  platform   Platform @default(codeforces)
+  externalId String   @map("external_id") // e.g., CF-1843A
+  title      String
+  rating     Int?
+  tags       String[]
+  link       String?
+  contestId  Int?     @map("contest_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  contest     Contest?     @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  submissions Submission[]
+
+  @@index([platform, rating])
+  @@unique([platform, externalId])
+  @@map("problems")
+}
+
+model Submission {
+  id           Int              @id @default(autoincrement())
+  userId       String           @map("user_id") @db.Uuid
+  problemId    Int              @map("problem_id")
+  contestId    Int?             @map("contest_id")
+  status       SubmissionStatus
+  language     String?
+  points       Int              @default(0)
+  execTimeMs   Int?             @map("exec_time_ms")
+  memoryKb     Int?             @map("memory_kb")
+  submittedAt  DateTime         @default(now()) @map("submitted_at")
+
+  // Relations
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problem Problem  @relation(fields: [problemId], references: [id])
+  contest Contest? @relation(fields: [contestId], references: [id])
+
+  @@index([contestId, problemId])
+  @@index([userId, submittedAt])
+  @@map("submissions")
+}
+
+model ContestParticipant {
+  id           Int     @id @default(autoincrement())
+  contestId    Int     @map("contest_id")
+  userId       String  @map("user_id") @db.Uuid
+  virtual      Boolean @default(false)
+  ratingAtJoin Int?    @map("rating_at_join")
+  joinedAt     DateTime @default(now()) @map("joined_at")
+
+  // Relations
+  contest Contest @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([contestId, userId])
+  @@map("contest_participants")
+}
+
+model Friendship {
+  id       Int    @id @default(autoincrement())
+  userId   String @map("user_id") @db.Uuid
+  friendId String @map("friend_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user   User @relation("UserFriendships", fields: [userId], references: [id], onDelete: Cascade)
+  friend User @relation("FriendOf", fields: [friendId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, friendId])
+  @@map("friendships")
+}
+
+model UserStats {
+  id              Int      @id @default(autoincrement())
+  userId          String   @map("user_id") @db.Uuid
+  date            DateTime @db.Date
+  solvedCount     Int      @default(0) @map("solved_count")
+  attemptedCount  Int      @default(0) @map("attempted_count")
+  rating          Int      @default(0)
+  tagsHistogram   Json?    @map("tags_histogram") // JSONB for tag frequency
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@map("user_stats")
+}
+
+model CollegeRequest {
+  id          Int                  @id @default(autoincrement())
+  name        String
+  state       String
+  city        String
+  requestedBy String               @map("requested_by") @db.Uuid
+  status      CollegeRequestStatus @default(pending)
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+
+  // Relations
+  requester User    @relation(fields: [requestedBy], references: [id])
+  college   College? @relation(fields: [collegeId], references: [id])
+  collegeId Int?     @map("college_id")
+
+  @@map("college_requests")
+}
+
+model CodeforcesVerification {
+  id         Int      @id @default(autoincrement())
+  userId     String   @map("user_id") @db.Uuid
+  handle     String
+  tokenHash  String   @map("token_hash")
+  verifiedAt DateTime @default(now()) @map("verified_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, handle])
+  @@map("codeforces_verifications")
+}
+
+model VerificationToken {
+  id        Int      @id @default(autoincrement())
+  userId    String   @map("user_id") @db.Uuid
+  handle    String
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("verification_tokens")
+}

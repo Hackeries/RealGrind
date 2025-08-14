@@ -1,57 +1,42 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/lib/auth"
-import { neon } from "@neondatabase/serverless"
+import { getServerSession } from "@/lib/auth"
+import { createServerComponentClient } from "@supabase/auth-helpers-nextjs"
+import { cookies } from "next/headers"
 
 export const dynamic = "force-dynamic"
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const sql = neon(process.env.DATABASE_URL!)
-
+    const supabase = createServerComponentClient({ cookies })
     const contestId = params.id
 
     // Get contest details
-    const contest = await sql`
-      SELECT 
-        cc.id,
-        cc.name,
-        cc.college,
-        cc.description,
-        cc.start_time,
-        cc.end_time,
-        cc.created_by,
-        cc.is_active,
-        cc.created_at,
-        u.name as creator_name
-      FROM college_contests cc
-      LEFT JOIN users u ON cc.created_by = u.id
-      WHERE cc.id = ${contestId}
-    `
+    const { data: contest, error: contestError } = await supabase
+      .from("college_contests")
+      .select(`
+        *,
+        users!college_contests_created_by_fkey (name)
+      `)
+      .eq("id", contestId)
+      .single()
 
-    if (contest.length === 0) {
+    if (contestError || !contest) {
       return NextResponse.json({ error: "Contest not found" }, { status: 404 })
     }
 
     // Get participants with their scores
-    const participants = await sql`
-      SELECT 
-        ccp.user_id,
-        ccp.score,
-        ccp.rank,
-        ccp.joined_at,
-        u.name,
-        u.codeforces_handle,
-        u.current_rating
-      FROM college_contest_participants ccp
-      JOIN users u ON ccp.user_id = u.id
-      WHERE ccp.contest_id = ${contestId}
-      ORDER BY ccp.rank ASC NULLS LAST, ccp.score DESC
-    `
+    const { data: participants } = await supabase
+      .from("college_contest_participants")
+      .select(`
+        *,
+        users (name, codeforces_handle, current_rating)
+      `)
+      .eq("contest_id", contestId)
+      .order("rank", { ascending: true })
 
     return NextResponse.json({
-      contest: contest[0],
-      participants,
+      contest,
+      participants: participants || [],
     })
   } catch (error) {
     console.error("Contest fetch error:", error)
@@ -64,66 +49,60 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const sql = neon(process.env.DATABASE_URL!)
-
-    const session = await getServerSession(authOptions)
-    if (!session?.user?.id) {
+    const session = await getServerSession()
+    if (!session?.user?.email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
+    const supabase = createServerComponentClient({ cookies })
     const contestId = params.id
     const { action } = await request.json()
 
     if (action === "join") {
-      // Check if contest exists and is active
-      const contest = await sql`
-        SELECT id, name, start_time, end_time, is_active
-        FROM college_contests
-        WHERE id = ${contestId}
-      `
+      // Get user ID
+      const { data: user } = await supabase.from("users").select("id").eq("email", session.user.email).single()
 
-      if (contest.length === 0) {
+      if (!user) {
+        return NextResponse.json({ error: "User not found" }, { status: 404 })
+      }
+
+      // Check if contest exists and is active
+      const { data: contest } = await supabase.from("college_contests").select("*").eq("id", contestId).single()
+
+      if (!contest) {
         return NextResponse.json({ error: "Contest not found" }, { status: 404 })
       }
 
-      if (!contest[0].is_active) {
+      if (!contest.is_active) {
         return NextResponse.json({ error: "Contest is not active" }, { status: 400 })
       }
 
       const now = new Date()
-      const endTime = new Date(contest[0].end_time)
+      const endTime = new Date(contest.end_time)
 
       if (now > endTime) {
         return NextResponse.json({ error: "Contest has ended" }, { status: 400 })
       }
 
       // Check if user is already participating
-      const existing = await sql`
-        SELECT id FROM college_contest_participants
-        WHERE contest_id = ${contestId} AND user_id = ${session.user.id}
-      `
+      const { data: existing } = await supabase
+        .from("college_contest_participants")
+        .select("id")
+        .eq("contest_id", contestId)
+        .eq("user_id", user.id)
+        .single()
 
-      if (existing.length > 0) {
+      if (existing) {
         return NextResponse.json({ error: "Already participating in this contest" }, { status: 400 })
       }
 
       // Add participant
-      await sql`
-        INSERT INTO college_contest_participants (contest_id, user_id)
-        VALUES (${contestId}, ${session.user.id})
-      `
+      const { error: participantError } = await supabase.from("college_contest_participants").insert({
+        contest_id: contestId,
+        user_id: user.id,
+      })
 
-      // Create activity
-      await sql`
-        INSERT INTO activities (user_id, type, title, description, metadata)
-        VALUES (
-          ${session.user.id},
-          'contest_joined',
-          'Joined College Contest',
-          ${`Joined "${contest[0].name}"`},
-          ${JSON.stringify({ contestId, contestName: contest[0].name })}
-        )
-      `
+      if (participantError) throw participantError
 
       return NextResponse.json({ success: true, message: "Successfully joined contest" })
     }

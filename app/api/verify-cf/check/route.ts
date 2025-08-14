@@ -1,107 +1,92 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth"
-import { authOptions } from "@/lib/auth"
-import { getDb } from "@/lib/db"
+import { requireAuth } from "@/lib/auth"
+import { prisma } from "@/lib/prisma"
 import { codeforcesAPI } from "@/lib/codeforces-api"
+import { CacheManager } from "@/lib/redis"
 
 export const dynamic = "force-dynamic"
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getServerSession(authOptions)
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const user = await requireAuth()
+    const { token } = await request.json()
+
+    if (!token) {
+      return NextResponse.json({ error: "Token is required" }, { status: 400 })
     }
 
-    // Get user's verification details
-    const sql = getDb()
-    const user = await sql`
-      SELECT codeforces_handle, verification_problem_id, codeforces_verified
-      FROM users 
-      WHERE email = ${session.user.email}
-    `
+    // Get verification token from database
+    const verificationToken = await prisma.verificationToken.findFirst({
+      where: {
+        token,
+        userId: user.id,
+        used: false,
+        expiresAt: { gt: new Date() },
+      },
+    })
 
-    if (user.length === 0) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
+    if (!verificationToken) {
+      return NextResponse.json({ error: "Invalid or expired token" }, { status: 400 })
     }
 
-    const userData = user[0]
-    if (!userData.codeforces_handle || !userData.verification_problem_id) {
-      return NextResponse.json({ error: "No verification in progress" }, { status: 400 })
-    }
+    // Check for compilation error submissions
+    const tenMinutesAgo = Math.floor(Date.now() / 1000) - 600
+    const verificationSubmissions = await codeforcesAPI.getVerificationSubmissions(
+      verificationToken.handle,
+      verificationToken.problemId,
+      tenMinutesAgo,
+    )
 
-    if (userData.codeforces_verified) {
-      return NextResponse.json({ error: "Handle already verified" }, { status: 400 })
-    }
-
-    // Get recent submissions from the user
-    try {
-      const submissions = await codeforcesAPI.getUserSubmissions(userData.codeforces_handle, 1, 50)
-
-      // Parse the expected problem ID
-      const problemId = userData.verification_problem_id
-      const contestId = Number.parseInt(problemId.slice(0, -1))
-      const problemIndex = problemId.slice(-1)
-
-      // Look for compilation error submissions to the verification problem
-      const verificationSubmissions = submissions.filter((sub) => {
-        const matchesProblem = sub.problem.contestId === contestId && sub.problem.index === problemIndex
-        const isCompilationError = sub.verdict === "COMPILATION_ERROR"
-
-        // Check if submission was made in the last 10 minutes (for recent verification)
-        const tenMinutesAgo = Math.floor(Date.now() / 1000) - 600
-        const isRecent = sub.creationTimeSeconds > tenMinutesAgo
-
-        return matchesProblem && isCompilationError && isRecent
-      })
-
-      if (verificationSubmissions.length === 0) {
-        return NextResponse.json({
-          success: false,
-          message:
-            "No compilation error submission found for the verification problem. Please submit a solution that causes a compilation error.",
-        })
-      }
-
-      // Verification successful - update user
-      const verificationSubmission = verificationSubmissions[0]
-      await sql`
-        UPDATE users 
-        SET 
-          codeforces_verified = true,
-          verification_submission_id = ${verificationSubmission.id.toString()}
-        WHERE email = ${session.user.email}
-      `
-
-      // Sync user data from Codeforces
-      try {
-        const cfUser = await codeforcesAPI.getUserInfo(userData.codeforces_handle)
-        await sql`
-          UPDATE users 
-          SET 
-            name = COALESCE(name, ${cfUser.firstName && cfUser.lastName ? `${cfUser.firstName} ${cfUser.lastName}` : cfUser.handle}),
-            image = COALESCE(image, ${cfUser.avatar || null})
-          WHERE email = ${session.user.email}
-        `
-      } catch (syncError) {
-        console.error("Error syncing user data:", syncError)
-        // Don't fail verification if sync fails
-      }
-
+    if (verificationSubmissions.length === 0) {
       return NextResponse.json({
-        success: true,
-        message: "Codeforces handle verified successfully!",
-        submissionId: verificationSubmission.id,
-      })
-    } catch (error) {
-      console.error("Error checking submissions:", error)
-      return NextResponse.json({
-        success: false,
-        message: "Error checking your submissions. Please try again.",
+        verified: false,
+        message: "No compilation error submission found. Please submit the verification code and try again.",
       })
     }
+
+    // Mark token as used
+    await prisma.verificationToken.update({
+      where: { id: verificationToken.id },
+      data: { used: true },
+    })
+
+    // Get user info from Codeforces
+    const cfUser = await codeforcesAPI.getUserInfo(verificationToken.handle)
+
+    // Update user with verified handle and rating
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        codeforcesHandle: verificationToken.handle,
+        rating: cfUser.rating || 0,
+        name: user.name || `${cfUser.firstName || ""} ${cfUser.lastName || ""}`.trim() || cfUser.handle,
+      },
+    })
+
+    // Store verification record
+    await prisma.codeforcesVerification.create({
+      data: {
+        userId: user.id,
+        handle: verificationToken.handle,
+        verifiedAt: new Date(),
+        tokenHash: Buffer.from(token).toString("base64"),
+      },
+    })
+
+    // Clear cache
+    await CacheManager.del(`verify_token:${token}`)
+
+    return NextResponse.json({
+      verified: true,
+      message: "Codeforces handle verified successfully!",
+      handle: verificationToken.handle,
+      rating: cfUser.rating || 0,
+    })
   } catch (error) {
     console.error("Error checking CF verification:", error)
-    return NextResponse.json({ error: "Failed to check verification" }, { status: 500 })
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to check verification" },
+      { status: 500 },
+    )
   }
 }
