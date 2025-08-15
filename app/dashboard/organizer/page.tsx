@@ -1,6 +1,6 @@
 "use client"
 
-import { useSession } from "next-auth/react"
+import { useAuth } from "@/components/providers"
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -66,7 +66,7 @@ interface OrganizerStats {
 }
 
 export default function OrganizerDashboard() {
-  const { data: session, status } = useSession()
+  const { user, loading: authLoading } = useAuth()
   const router = useRouter()
   const [stats, setStats] = useState<OrganizerStats | null>(null)
   const [loading, setLoading] = useState(true)
@@ -74,21 +74,20 @@ export default function OrganizerDashboard() {
   const { toast } = useToast()
 
   useEffect(() => {
-    if (status === "unauthenticated") {
+    if (!authLoading && !user) {
       router.push("/auth/signin")
       return
     }
 
-    if (status === "authenticated") {
-      // Check if user has organizer role
-      if (session?.user?.role && session.user.role !== "organizer") {
-        const redirectPath = session.user.role === "admin" ? "/dashboard/admin" : "/dashboard/student"
+    if (user) {
+      if (user.role && user.role !== "organizer") {
+        const redirectPath = user.role === "admin" ? "/dashboard/admin" : "/dashboard"
         router.push(redirectPath)
         return
       }
       fetchStats()
     }
-  }, [status, router, session])
+  }, [authLoading, user, router])
 
   const fetchStats = async () => {
     try {
@@ -140,7 +139,7 @@ export default function OrganizerDashboard() {
     }
   }
 
-  if (status === "loading" || loading) {
+  if (authLoading || loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-blue-900 flex items-center justify-center">
         <div className="text-center">
@@ -249,8 +248,8 @@ export default function OrganizerDashboard() {
               Organizer
             </Badge>
             <Avatar>
-              <AvatarImage src={session?.user?.image || ""} />
-              <AvatarFallback className="bg-gray-700 text-white">{session?.user?.name?.[0] || "O"}</AvatarFallback>
+              <AvatarImage src={user?.avatar_url || ""} />
+              <AvatarFallback className="bg-gray-700 text-white">{user?.name?.[0] || "O"}</AvatarFallback>
             </Avatar>
           </div>
         </div>
@@ -259,7 +258,7 @@ export default function OrganizerDashboard() {
       <div className="container mx-auto px-4 py-8">
         {/* Welcome Message */}
         <div className="mb-8">
-          <h2 className="text-4xl font-bold text-white mb-2">Welcome back, {session?.user?.name?.split(" ")[0]}!</h2>
+          <h2 className="text-4xl font-bold text-white mb-2">Welcome back, {user?.name?.split(" ")[0]}!</h2>
           <p className="text-xl text-gray-300">
             Manage contests and track performance for {stats?.user.college || "your college"}
           </p>

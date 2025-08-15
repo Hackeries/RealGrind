@@ -1,6 +1,6 @@
 "use client"
 
-import { useSession } from "next-auth/react"
+import { useAuth } from "@/components/providers"
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -66,7 +66,7 @@ interface UserStats {
 }
 
 export default function StudentDashboard() {
-  const { data: session, status } = useSession()
+  const { user, loading: authLoading } = useAuth()
   const router = useRouter()
   const [stats, setStats] = useState<UserStats | null>(null)
   const [loading, setLoading] = useState(true)
@@ -75,21 +75,20 @@ export default function StudentDashboard() {
   const { toast } = useToast()
 
   useEffect(() => {
-    if (status === "unauthenticated") {
+    if (!authLoading && !user) {
       router.push("/auth/signin")
       return
     }
 
-    if (status === "authenticated") {
-      // Check if user has student role
-      if (session?.user?.role && session.user.role !== "student") {
-        const redirectPath = session.user.role === "admin" ? "/dashboard/admin" : "/dashboard/organizer"
+    if (user) {
+      if (user.role && user.role !== "user") {
+        const redirectPath = user.role === "admin" ? "/dashboard/admin" : "/dashboard"
         router.push(redirectPath)
         return
       }
       fetchStats()
     }
-  }, [status, router, session])
+  }, [authLoading, user, router])
 
   const fetchStats = async () => {
     try {
@@ -169,7 +168,7 @@ export default function StudentDashboard() {
     return "Grandmaster"
   }
 
-  if (status === "loading" || loading) {
+  if (authLoading || loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-blue-900 flex items-center justify-center">
         <div className="text-center">
@@ -283,8 +282,8 @@ export default function StudentDashboard() {
               <span>{syncing ? "Syncing..." : "Sync"}</span>
             </Button>
             <Avatar>
-              <AvatarImage src={session?.user?.image || ""} />
-              <AvatarFallback className="bg-gray-700 text-white">{session?.user?.name?.[0] || "U"}</AvatarFallback>
+              <AvatarImage src={user?.avatar_url || ""} />
+              <AvatarFallback className="bg-gray-700 text-white">{user?.name?.[0] || "U"}</AvatarFallback>
             </Avatar>
           </div>
         </div>
@@ -294,7 +293,7 @@ export default function StudentDashboard() {
         {/* Personalized Welcome Message */}
         <div className="mb-8">
           <h2 className="text-4xl font-bold text-white mb-2">
-            Hey {session?.user?.name?.split(" ")[0]}, ready to climb the ranks?
+            Hey {user?.name?.split(" ")[0]}, ready to climb the ranks?
           </h2>
           <p className="text-xl text-gray-300">Track your progress and compete with peers from your college</p>
         </div>

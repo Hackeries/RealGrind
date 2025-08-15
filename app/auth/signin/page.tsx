@@ -45,7 +45,7 @@ export default function SignInPage() {
             id: session.user.id,
             email: session.user.email,
             name: session.user.user_metadata?.full_name || session.user.email?.split("@")[0],
-            role: "student",
+            role: "user",
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           })
@@ -56,8 +56,12 @@ export default function SignInPage() {
 
           router.replace("/onboarding")
         } else {
-          // Existing user - redirect to dashboard
-          router.replace("/dashboard")
+          // Existing user - redirect based on role
+          if (existingUser.role === "admin") {
+            router.replace("/dashboard/admin")
+          } else {
+            router.replace("/dashboard")
+          }
         }
       }
     })
