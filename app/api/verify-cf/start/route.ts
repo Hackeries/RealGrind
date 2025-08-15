@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
+import { FirestoreOperations, UserOperations } from "@/lib/firestore/operations"
+import { COLLECTIONS } from "@/lib/firestore/collections"
 import { codeforcesAPI } from "@/lib/codeforces-api"
 import { CacheManager } from "@/lib/redis"
 import { nanoid } from "nanoid"
@@ -12,7 +13,7 @@ const TOKEN_EXPIRY_MINUTES = 10
 
 export async function POST(request: NextRequest) {
   try {
-    const user = await requireAuth()
+    const user = await requireAuth(request)
     const { handle } = await request.json()
 
     if (!handle || typeof handle !== "string") {
@@ -25,15 +26,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Codeforces handle not found" }, { status: 400 })
     }
 
-    // Check if handle is already verified by another user
-    const existingUser = await prisma.user.findFirst({
-      where: {
-        codeforcesHandle: handle,
-        NOT: { id: user.id },
-      },
-    })
-
-    if (existingUser) {
+    const existingUser = await UserOperations.getUserByCodeforcesHandle(handle)
+    if (existingUser && existingUser.id !== user.id) {
       return NextResponse.json({ error: "This handle is already verified by another user" }, { status: 400 })
     }
 
@@ -41,15 +35,14 @@ export async function POST(request: NextRequest) {
     const token = `REALGRIND-VERIFY-${nanoid(8).toUpperCase()}`
     const expiresAt = new Date(Date.now() + TOKEN_EXPIRY_MINUTES * 60 * 1000)
 
-    // Store verification token
-    await prisma.verificationToken.create({
-      data: {
-        userId: user.id,
-        handle,
-        token,
-        problemId: VERIFICATION_PROBLEM_ID,
-        expiresAt,
-      },
+    await FirestoreOperations.create(COLLECTIONS.VERIFICATION_TOKENS, {
+      userId: user.id,
+      handle,
+      token,
+      problemId: VERIFICATION_PROBLEM_ID,
+      expiresAt,
+      used: false,
+      createdAt: new Date(),
     })
 
     // Cache token for quick lookup

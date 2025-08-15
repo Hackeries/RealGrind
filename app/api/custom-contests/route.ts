@@ -1,10 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { requireAuth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
+import { ContestOperations, ProblemOperations } from "@/lib/firestore/operations"
 import { codeforcesAPI } from "@/lib/codeforces-api"
 import { CacheManager } from "@/lib/redis"
 import { z } from "zod"
-import { ContestType, ContestVisibility, ContestStatus } from "@prisma/client"
 
 const CustomContestSchema = z.object({
   title: z.string().min(1, "Contest title is required").max(100),
@@ -18,7 +17,7 @@ const CustomContestSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    const user = await requireAuth()
+    const user = await requireAuth(request)
     const body = await request.json()
     const data = CustomContestSchema.parse(body)
 
@@ -94,57 +93,35 @@ export async function POST(request: NextRequest) {
     const startTime = new Date()
     const endTime = new Date(startTime.getTime() + data.duration * 60 * 1000)
 
-    const contest = await prisma.contest.create({
-      data: {
-        title: data.title,
-        description: `Custom practice contest: ${data.ratingMin}-${data.ratingMax} rating range`,
-        type: ContestType.college,
-        visibility: ContestVisibility.private,
-        status: ContestStatus.upcoming,
-        startTime,
-        endTime,
-        createdById: user.id,
-        problems: {
-          create: selectedProblems.map((problem, index) => ({
-            platform: "codeforces",
-            externalId: `${problem.contestId}${problem.index}`,
-            title: problem.name,
-            rating: problem.rating,
-            tags: problem.tags,
-            link: `https://codeforces.com/problemset/problem/${problem.contestId}/${problem.index}`,
-            order: index + 1,
-          })),
-        },
-        participants: {
-          create: [
-            {
-              userId: user.id,
-              virtual: false,
-              ratingAtJoin: user.rating || 0,
-            },
-            ...(data.friends?.map((friendId) => ({
-              userId: friendId,
-              virtual: false,
-              ratingAtJoin: 0, // Will be updated when they join
-            })) || []),
-          ],
-        },
-      },
-      include: {
-        problems: true,
-        participants: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                codeforcesHandle: true,
-              },
-            },
-          },
-        },
-      },
+    const contest = await ContestOperations.createContest({
+      title: data.title,
+      description: `Custom practice contest: ${data.ratingMin}-${data.ratingMax} rating range`,
+      type: "custom",
+      visibility: "private",
+      startTime,
+      endTime,
+      createdBy: user.id,
+      participants: [user.id, ...(data.friends || [])],
+      problems: [],
+      createdAt: new Date(),
     })
+
+    // Create problems for the contest
+    const contestProblems = []
+    for (let i = 0; i < selectedProblems.length; i++) {
+      const problem = selectedProblems[i]
+      const contestProblem = await ProblemOperations.createProblem({
+        contestId: contest.id,
+        platform: "codeforces",
+        problemId: `${problem.contestId}${problem.index}`,
+        title: problem.name,
+        rating: problem.rating,
+        tags: problem.tags,
+        url: `https://codeforces.com/problemset/problem/${problem.contestId}/${problem.index}`,
+        createdAt: new Date(),
+      })
+      contestProblems.push(contestProblem)
+    }
 
     return NextResponse.json({
       success: true,
@@ -153,7 +130,7 @@ export async function POST(request: NextRequest) {
         title: contest.title,
         startTime: contest.startTime,
         endTime: contest.endTime,
-        problems: contest.problems.length,
+        problems: contestProblems.length,
         participants: contest.participants.length,
         shareUrl: `/c/${contest.id}`,
       },

@@ -2,22 +2,23 @@
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Code, Chrome, Trophy, Target, Users, TrendingUp } from "lucide-react"
+import { Code, Chrome, Trophy, Target, Users, TrendingUp, Github } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
 
 export default function SignInPage() {
   const router = useRouter()
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState<"google" | "github" | null>(null)
 
   useEffect(() => {
+    // Check if user is already signed in
     const checkUser = async () => {
       const {
         data: { session },
       } = await supabase.auth.getSession()
       if (session) {
-        router.push("/onboarding")
+        router.push("/dashboard")
       }
     }
     checkUser()
@@ -25,21 +26,51 @@ export default function SignInPage() {
 
   const handleGoogleSignIn = async () => {
     try {
-      setLoading(true)
-      const { error } = await supabase.auth.signInWithOAuth({
+      setLoading("google")
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+          queryParams: {
+            access_type: "offline",
+            prompt: "consent",
+          },
+        },
+      })
+
+      if (error) {
+        console.error("Google sign in error:", error.message)
+        alert(`Google sign-in failed: ${error.message}`)
+        setLoading(null)
+      }
+      // Note: Don't set loading to null on success as redirect will happen
+    } catch (error) {
+      console.error("Google sign in error:", error)
+      alert("An unexpected error occurred during Google sign-in")
+      setLoading(null)
+    }
+  }
+
+  const handleGitHubSignIn = async () => {
+    try {
+      setLoading("github")
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "github",
         options: {
           redirectTo: `${window.location.origin}/auth/callback`,
         },
       })
 
       if (error) {
-        console.error("Sign in error:", error)
+        console.error("GitHub sign in error:", error.message)
+        alert(`GitHub sign-in failed: ${error.message}`)
+        setLoading(null)
       }
+      // Note: Don't set loading to null on success as redirect will happen
     } catch (error) {
-      console.error("Sign in error:", error)
-    } finally {
-      setLoading(false)
+      console.error("GitHub sign in error:", error)
+      alert("An unexpected error occurred during GitHub sign-in")
+      setLoading(null)
     }
   }
 
@@ -57,10 +88,9 @@ export default function SignInPage() {
                 RealGrind
               </h1>
             </div>
-            <h2 className="text-3xl font-bold text-white mb-4">Master Competitive Programming</h2>
+            <h2 className="text-3xl font-bold text-white mb-4">🚀 Welcome to RealGrind</h2>
             <p className="text-xl text-gray-300 max-w-2xl mx-auto">
-              Track your progress, compete with peers from your college, and climb the leaderboards in India's premier
-              competitive programming platform.
+              Sign in to start competing and tracking your progress.
             </p>
           </div>
 
@@ -132,22 +162,36 @@ export default function SignInPage() {
                 <CardHeader className="text-center space-y-4">
                   <CardTitle className="text-2xl font-bold text-white">Get Started</CardTitle>
                   <CardDescription className="text-gray-400">
-                    Sign in with Google to start your competitive programming journey
+                    Choose your preferred sign-in method to start your competitive programming journey
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-6">
+                <CardContent className="space-y-4">
                   <Button
                     onClick={handleGoogleSignIn}
-                    disabled={loading}
+                    disabled={loading !== null}
                     className="w-full bg-white hover:bg-gray-100 text-gray-900 border-0 shadow-lg"
                     size="lg"
                   >
-                    {loading ? (
+                    {loading === "google" ? (
                       <div className="w-5 h-5 mr-3 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
                     ) : (
                       <Chrome className="w-5 h-5 mr-3" />
                     )}
-                    Continue with Google
+                    Sign in with Google
+                  </Button>
+
+                  <Button
+                    onClick={handleGitHubSignIn}
+                    disabled={loading !== null}
+                    className="w-full bg-gray-900 hover:bg-gray-800 text-white border border-gray-700 shadow-lg"
+                    size="lg"
+                  >
+                    {loading === "github" ? (
+                      <div className="w-5 h-5 mr-3 animate-spin rounded-full border-2 border-gray-300 border-t-white" />
+                    ) : (
+                      <Github className="w-5 h-5 mr-3" />
+                    )}
+                    Sign in with GitHub
                   </Button>
 
                   <div className="text-center space-y-2">

@@ -1,15 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { requireRole } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
-import { UserRole, type CollegeTier, type CollegeAffiliation } from "@prisma/client"
+import { requireRole, UserRole } from "@/lib/auth"
+import { CollegeOperations } from "@/lib/firestore/operations"
 import { z } from "zod"
 
 const CollegeImportSchema = z.object({
   name: z.string().min(1, "College name is required"),
   state: z.string().min(1, "State is required"),
   city: z.string().min(1, "City is required"),
-  tier: z.enum(["T1", "T2", "T3", "OTHER"]).default("T2"),
-  affiliation: z.enum(["AICTE", "UGC", "PRIVATE", "AUTONOMOUS"]).default("AICTE"),
+  tier: z.coerce.number().min(1).max(3).default(2),
+  affiliation: z.string().default("AICTE"),
   website: z.string().url().optional(),
   logoUrl: z.string().url().optional(),
 })
@@ -26,7 +25,7 @@ function slugify(text: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    await requireRole([UserRole.admin])
+    await requireRole([UserRole.admin], request)
 
     const body = await request.json()
     const { colleges } = body
@@ -51,38 +50,28 @@ export async function POST(request: NextRequest) {
             const validated = CollegeImportSchema.parse(collegeData)
             const slug = slugify(`${validated.name}-${validated.state}-${validated.city}`)
 
-            const college = await prisma.college.upsert({
-              where: {
-                name_state_city: {
-                  name: validated.name,
-                  state: validated.state,
-                  city: validated.city,
-                },
+            const college = await CollegeOperations.upsertCollege(
+              {
+                name: validated.name,
+                state: validated.state,
+                city: validated.city,
               },
-              update: {
-                tier: validated.tier as CollegeTier,
-                affiliation: validated.affiliation as CollegeAffiliation,
-                website: validated.website,
-                logoUrl: validated.logoUrl,
-                updatedAt: new Date(),
-              },
-              create: {
+              {
                 name: validated.name,
                 slug,
                 state: validated.state,
                 city: validated.city,
-                tier: validated.tier as CollegeTier,
-                affiliation: validated.affiliation as CollegeAffiliation,
+                tier: validated.tier,
+                affiliation: validated.affiliation,
                 website: validated.website,
                 logoUrl: validated.logoUrl,
+                createdAt: new Date(),
               },
-            })
+            )
 
-            if (college.createdAt.getTime() === college.updatedAt.getTime()) {
-              results.imported++
-            } else {
-              results.updated++
-            }
+            // Note: In Firestore, we can't easily distinguish between created and updated
+            // For now, we'll count all as imported
+            results.imported++
           } catch (error) {
             const errorMsg = `Row ${i + index + 1}: ${error instanceof Error ? error.message : "Invalid data"}`
             results.errors.push(errorMsg)
@@ -93,7 +82,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Import completed: ${results.imported} imported, ${results.updated} updated`,
+      message: `Import completed: ${results.imported} processed`,
       results,
     })
   } catch (error) {

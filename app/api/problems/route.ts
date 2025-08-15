@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic"
 
 export async function GET(request: NextRequest) {
   try {
-    const user = await requireAuth()
+    const user = await requireAuth(request)
 
     if (!user.codeforcesHandle) {
       return NextResponse.json({ error: "Codeforces handle not verified" }, { status: 400 })

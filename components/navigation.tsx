@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import {
@@ -12,40 +12,20 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Code, Home, Trophy, Target, TrendingUp, Calendar, User, Settings, LogOut, Menu, X, Shield } from "lucide-react"
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
 import { useRouter } from "next/navigation"
+import { useAuth } from "@/components/providers"
+import { signOut } from "@/lib/firebase/auth"
 
 export function Navigation() {
-  const [user, setUser] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const supabase = createClientComponentClient()
   const router = useRouter()
-
-  useEffect(() => {
-    const getSession = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-      setUser(session?.user ?? null)
-      setLoading(false)
-    }
-
-    getSession()
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      setUser(session?.user ?? null)
-      setLoading(false)
-    })
-
-    return () => subscription.unsubscribe()
-  }, [supabase])
+  const { user, loading } = useAuth()
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    router.push("/")
+    const { error } = await signOut()
+    if (!error) {
+      router.push("/")
+    }
   }
 
   const navItems = [
@@ -94,12 +74,9 @@ export function Navigation() {
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="relative h-8 w-8 rounded-full">
                   <Avatar className="h-8 w-8">
-                    <AvatarImage
-                      src={user?.user_metadata?.avatar_url || ""}
-                      alt={user?.user_metadata?.full_name || ""}
-                    />
+                    <AvatarImage src={user?.photoURL || ""} alt={user?.displayName || ""} />
                     <AvatarFallback className="bg-purple-500 text-white">
-                      {user?.user_metadata?.full_name?.charAt(0) || user?.email?.charAt(0) || "U"}
+                      {user?.displayName?.charAt(0) || user?.email?.charAt(0) || "U"}
                     </AvatarFallback>
                   </Avatar>
                 </Button>
@@ -107,7 +84,7 @@ export function Navigation() {
               <DropdownMenuContent className="w-56 bg-gray-800 border-gray-700" align="end" forceMount>
                 <div className="flex items-center justify-start gap-2 p-2">
                   <div className="flex flex-col space-y-1 leading-none">
-                    <p className="font-medium text-white">{user?.user_metadata?.full_name || "User"}</p>
+                    <p className="font-medium text-white">{user?.displayName || "User"}</p>
                     <p className="w-[200px] truncate text-sm text-gray-400">{user?.email}</p>
                   </div>
                 </div>

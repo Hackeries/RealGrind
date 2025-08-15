@@ -1,33 +1,28 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "@/lib/auth"
-import { createServerComponentClient } from "@supabase/auth-helpers-nextjs"
-import { cookies } from "next/headers"
+import { UserOperations, CollegeOperations } from "@/lib/firestore/operations"
 
 export const dynamic = "force-dynamic"
 
 export async function PUT(request: NextRequest) {
   try {
-    const session = await getServerSession()
-    if (!session?.user?.email) {
+    const session = await getServerSession(request)
+    if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const supabase = createServerComponentClient({ cookies })
     const { collegeId, graduationYear, codeforcesHandle } = await request.json()
 
-    const { error } = await supabase
-      .from("users")
-      .update({
-        college_id: collegeId || null,
-        graduation_year: graduationYear || null,
-        codeforces_handle: codeforcesHandle || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("email", session.user.email)
+    await UserOperations.updateUser(session.user.id, {
+      collegeId: collegeId || undefined,
+      graduationYear: graduationYear || undefined,
+      codeforcesHandle: codeforcesHandle || undefined,
+      updatedAt: new Date(),
+    })
 
-    if (error) throw error
+    const updatedUser = await UserOperations.getUserById(session.user.id)
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, user: updatedUser })
   } catch (error) {
     console.error("Profile update error:", error)
     return NextResponse.json(
@@ -37,44 +32,32 @@ export async function PUT(request: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession()
-    if (!session?.user?.email) {
+    const session = await getServerSession(request)
+    if (!session?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const supabase = createServerComponentClient({ cookies })
+    const user = await UserOperations.getUserById(session.user.id)
 
-    const { data: user, error } = await supabase
-      .from("users")
-      .select(`
-        id, email, name, image, codeforces_handle, codeforces_verified,
-        graduation_year, current_rating, max_rating, problems_solved, contests_participated,
-        colleges (
-          id, name, short_name, location, state, tier
-        )
-      `)
-      .eq("email", session.user.email)
-      .single()
-
-    if (error || !user) {
+    if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 })
+    }
+
+    let college = null
+    if (user.collegeId) {
+      college = await CollegeOperations.getCollegeById(user.collegeId)
     }
 
     const response = {
       id: user.id,
       email: user.email,
       name: user.name,
-      image: user.image,
-      codeforces_handle: user.codeforces_handle,
-      codeforces_verified: user.codeforces_verified,
-      graduation_year: user.graduation_year,
-      current_rating: user.current_rating,
-      max_rating: user.max_rating,
-      problems_solved: user.problems_solved,
-      contests_participated: user.contests_participated,
-      college: user.colleges || null,
+      codeforcesHandle: user.codeforcesHandle,
+      graduationYear: user.graduationYear,
+      college: college,
+      role: user.role,
     }
 
     return NextResponse.json({ user: response })

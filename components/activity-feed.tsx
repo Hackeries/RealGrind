@@ -1,65 +1,21 @@
 "use client"
 
-import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Button } from "@/components/ui/button"
-import { Activity, Trophy, Target, TrendingUp, Award, RefreshCw, Code } from "lucide-react"
-
-interface ActivityItem {
-  id: string
-  type: string
-  title: string
-  description: string | null
-  metadata: any
-  created_at: string
-  user_name: string
-  avatar_url: string | null
-  codeforces_handle: string | null
-  college: string | null
-}
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Activity, Trophy, Target, TrendingUp, Award, Code } from "lucide-react"
+import { useRealtimeActivities } from "@/hooks/use-realtime-firestore"
+import { useAuth } from "@/components/providers"
 
 interface ActivityFeedProps {
   type?: "personal" | "global"
   limit?: number
-  refreshInterval?: number
 }
 
-export function ActivityFeed({ type = "global", limit = 20, refreshInterval = 60000 }: ActivityFeedProps) {
-  const [activities, setActivities] = useState<ActivityItem[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
+export function ActivityFeed({ type = "global", limit = 20 }: ActivityFeedProps) {
+  const { userDoc } = useAuth()
 
-  useEffect(() => {
-    fetchActivities()
-
-    // Set up auto-refresh for global feed
-    if (type === "global") {
-      const interval = setInterval(fetchActivities, refreshInterval)
-      return () => clearInterval(interval)
-    }
-  }, [type, limit, refreshInterval])
-
-  const fetchActivities = async () => {
-    try {
-      const response = await fetch(`/api/activities?type=${type}&limit=${limit}`)
-      if (response.ok) {
-        const data = await response.json()
-        setActivities(data.activities)
-      }
-    } catch (error) {
-      console.error("Failed to fetch activities:", error)
-    } finally {
-      setLoading(false)
-      setRefreshing(false)
-    }
-  }
-
-  const handleRefresh = async () => {
-    setRefreshing(true)
-    await fetchActivities()
-  }
+  const { data: activities, loading, error } = useRealtimeActivities(type === "personal" ? userDoc?.id : undefined)
 
   const getActivityIcon = (activityType: string) => {
     switch (activityType) {
@@ -93,9 +49,8 @@ export function ActivityFeed({ type = "global", limit = 20, refreshInterval = 60
     }
   }
 
-  const formatTimeAgo = (dateString: string) => {
+  const formatTimeAgo = (date: Date) => {
     const now = new Date()
-    const date = new Date(dateString)
     const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000)
 
     if (diffInSeconds < 60) return "Just now"
@@ -109,8 +64,18 @@ export function ActivityFeed({ type = "global", limit = 20, refreshInterval = 60
     return (
       <Card className="border-0 shadow-lg">
         <CardContent className="p-8 text-center">
-          <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-600" />
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4" />
           <p className="text-gray-600">Loading activities...</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (error) {
+    return (
+      <Card className="border-0 shadow-lg">
+        <CardContent className="p-8 text-center">
+          <p className="text-red-600">Error loading activities: {error}</p>
         </CardContent>
       </Card>
     )
@@ -119,15 +84,14 @@ export function ActivityFeed({ type = "global", limit = 20, refreshInterval = 60
   return (
     <Card className="border-0 shadow-lg">
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center space-x-2">
-            <Activity className="w-5 h-5" />
-            <span>{type === "personal" ? "Your Activity" : "Recent Activity"}</span>
-          </CardTitle>
-          <Button onClick={handleRefresh} disabled={refreshing} variant="outline" size="sm" className="bg-transparent">
-            <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
-          </Button>
-        </div>
+        <CardTitle className="flex items-center space-x-2">
+          <Activity className="w-5 h-5" />
+          <span>{type === "personal" ? "Your Activity" : "Recent Activity"}</span>
+          <div className="flex items-center space-x-2 text-sm text-gray-500">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <span>Live</span>
+          </div>
+        </CardTitle>
       </CardHeader>
       <CardContent>
         {activities.length === 0 ? (
@@ -140,7 +104,7 @@ export function ActivityFeed({ type = "global", limit = 20, refreshInterval = 60
           </div>
         ) : (
           <div className="space-y-4">
-            {activities.map((activity) => (
+            {activities.slice(0, limit).map((activity: any) => (
               <div
                 key={activity.id}
                 className={`flex items-start space-x-3 p-3 rounded-lg border ${getActivityColor(activity.type)}`}
@@ -149,24 +113,18 @@ export function ActivityFeed({ type = "global", limit = 20, refreshInterval = 60
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center space-x-2 mb-1">
                     <Avatar className="w-6 h-6">
-                      <AvatarImage src={activity.avatar_url || ""} />
-                      <AvatarFallback className="text-xs">{activity.user_name[0]}</AvatarFallback>
+                      <AvatarFallback className="text-xs">{activity.userName?.[0] || "?"}</AvatarFallback>
                     </Avatar>
-                    <span className="font-medium text-sm">{activity.user_name}</span>
-                    {activity.codeforces_handle && (
+                    <span className="font-medium text-sm">{activity.userName}</span>
+                    {activity.codeforcesHandle && (
                       <Badge variant="outline" className="text-xs">
-                        @{activity.codeforces_handle}
-                      </Badge>
-                    )}
-                    {activity.college && type === "global" && (
-                      <Badge variant="outline" className="text-xs">
-                        {activity.college}
+                        @{activity.codeforcesHandle}
                       </Badge>
                     )}
                   </div>
                   <p className="text-sm font-medium text-gray-800">{activity.title}</p>
                   {activity.description && <p className="text-sm text-gray-600">{activity.description}</p>}
-                  <p className="text-xs text-gray-500 mt-1">{formatTimeAgo(activity.created_at)}</p>
+                  <p className="text-xs text-gray-500 mt-1">{formatTimeAgo(activity.createdAt.toDate())}</p>
                 </div>
               </div>
             ))}

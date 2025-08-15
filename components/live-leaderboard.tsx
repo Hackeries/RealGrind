@@ -1,56 +1,20 @@
 "use client"
 
-import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Trophy, Medal, Crown, RefreshCw, Zap } from "lucide-react"
-
-interface LiveStanding {
-  user_id: string
-  score: number
-  rank: number | null
-  joined_at: string
-  name: string
-  codeforces_handle: string | null
-  current_rating: number
-  avatar_url: string | null
-  live_rank: number
-}
+import { Trophy, Medal, Crown, Zap } from "lucide-react"
+import { useRealtimeLeaderboard } from "@/hooks/use-realtime-firestore"
+import type { UserDoc } from "@/lib/firestore/collections"
 
 interface LiveLeaderboardProps {
-  contestId: string
+  type?: "college" | "national"
+  collegeId?: string
   refreshInterval?: number
 }
 
-export function LiveLeaderboard({ contestId, refreshInterval = 30000 }: LiveLeaderboardProps) {
-  const [standings, setStandings] = useState<LiveStanding[]>([])
-  const [loading, setLoading] = useState(true)
-  const [lastUpdated, setLastUpdated] = useState<string>("")
-
-  useEffect(() => {
-    const fetchStandings = async () => {
-      try {
-        const response = await fetch(`/api/leaderboard/live?contestId=${contestId}`)
-        if (response.ok) {
-          const data = await response.json()
-          setStandings(data.standings)
-          setLastUpdated(data.lastUpdated)
-        }
-      } catch (error) {
-        console.error("Failed to fetch live standings:", error)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchStandings()
-
-    // Set up auto-refresh
-    const interval = setInterval(fetchStandings, refreshInterval)
-
-    return () => clearInterval(interval)
-  }, [contestId, refreshInterval])
+export function LiveLeaderboard({ type = "national", collegeId }: LiveLeaderboardProps) {
+  const { data: users, loading, error } = useRealtimeLeaderboard(type, collegeId)
 
   const getRankIcon = (rank: number) => {
     if (rank === 1) return <Crown className="w-5 h-5 text-yellow-500" />
@@ -70,8 +34,18 @@ export function LiveLeaderboard({ contestId, refreshInterval = 30000 }: LiveLead
     return (
       <Card className="border-0 shadow-lg">
         <CardContent className="p-8 text-center">
-          <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-600" />
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4" />
           <p className="text-gray-600">Loading live standings...</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (error) {
+    return (
+      <Card className="border-0 shadow-lg">
+        <CardContent className="p-8 text-center">
+          <p className="text-red-600">Error loading leaderboard: {error}</p>
         </CardContent>
       </Card>
     )
@@ -83,50 +57,40 @@ export function LiveLeaderboard({ contestId, refreshInterval = 30000 }: LiveLead
         <CardTitle className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <Zap className="w-5 h-5 text-yellow-500" />
-            <span>Live Standings</span>
+            <span>Live Leaderboard</span>
           </div>
           <div className="flex items-center space-x-2 text-sm text-gray-500">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
             <span>Live</span>
           </div>
         </CardTitle>
-        {lastUpdated && (
-          <p className="text-sm text-gray-500">Last updated: {new Date(lastUpdated).toLocaleTimeString()}</p>
-        )}
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          {standings.map((participant) => (
+          {users.map((user: UserDoc, index) => (
             <div
-              key={participant.user_id}
+              key={user.id}
               className="flex items-center justify-between p-3 rounded-lg bg-white border border-gray-100 hover:shadow-md transition-shadow"
             >
               <div className="flex items-center space-x-3">
                 <div className="flex items-center space-x-2">
-                  {getRankIcon(participant.live_rank)}
-                  <Badge className={getRankBadge(participant.live_rank)}>#{participant.live_rank}</Badge>
+                  {getRankIcon(index + 1)}
+                  <Badge className={getRankBadge(index + 1)}>#{index + 1}</Badge>
                 </div>
                 <Avatar className="w-10 h-10">
-                  <AvatarImage src={participant.avatar_url || ""} />
-                  <AvatarFallback>{participant.name[0]}</AvatarFallback>
+                  <AvatarImage src={`https://userpic.codeforces.org/no-title/${user.codeforcesHandle}`} />
+                  <AvatarFallback>{user.name?.[0] || "?"}</AvatarFallback>
                 </Avatar>
                 <div>
-                  <h4 className="font-medium">{participant.name}</h4>
+                  <h4 className="font-medium">{user.name}</h4>
                   <div className="flex items-center space-x-2 text-sm text-gray-600">
-                    {participant.codeforces_handle && <span>@{participant.codeforces_handle}</span>}
-                    {participant.current_rating > 0 && (
-                      <Badge variant="outline" className="text-xs">
-                        {participant.current_rating}
-                      </Badge>
-                    )}
+                    {user.codeforcesHandle && <span>@{user.codeforcesHandle}</span>}
                   </div>
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-lg font-bold text-blue-600">{participant.score}</div>
-                <div className="text-xs text-gray-500">
-                  Joined {new Date(participant.joined_at).toLocaleDateString()}
-                </div>
+                <div className="text-lg font-bold text-blue-600">{user.rating || 0}</div>
+                <div className="text-xs text-gray-500">{new Date(user.updatedAt).toLocaleDateString()}</div>
               </div>
             </div>
           ))}

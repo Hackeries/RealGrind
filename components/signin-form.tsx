@@ -1,28 +1,41 @@
 "use client"
 
+import React from "react"
+
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { supabase } from "@/lib/supabase/client"
+import { signInWithGoogle } from "@/lib/firebase/auth"
 import { useRouter } from "next/navigation"
 import { Chrome } from "lucide-react"
+import { useAuth } from "@/components/providers"
+import { syncFirebaseUser } from "@/lib/auth"
 
 export default function SignInForm() {
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+  const { user } = useAuth()
+
+  React.useEffect(() => {
+    if (user) {
+      syncFirebaseUser(user)
+        .then(() => {
+          router.push("/onboarding")
+        })
+        .catch((error) => {
+          console.error("Failed to sync user:", error)
+        })
+    }
+  }, [user, router])
 
   const handleGoogleSignIn = async () => {
     setLoading(true)
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-        },
-      })
+      const { user, error } = await signInWithGoogle()
 
       if (error) {
-        console.error("Error signing in:", error.message)
+        console.error("Error signing in:", error)
       }
+      // User state will be handled by the useEffect above
     } catch (error) {
       console.error("Unexpected error:", error)
     } finally {
