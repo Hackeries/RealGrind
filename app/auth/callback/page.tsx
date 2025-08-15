@@ -23,7 +23,7 @@ export default function AuthCallback() {
         if (data.session?.user) {
           const { data: existingUser, error: userError } = await supabase
             .from("users")
-            .select("id")
+            .select("id, role")
             .eq("id", data.session.user.id)
             .single()
 
@@ -37,7 +37,7 @@ export default function AuthCallback() {
               email: data.session.user.email,
               name: data.session.user.user_metadata?.full_name || data.session.user.email?.split("@")[0],
               avatar_url: data.session.user.user_metadata?.avatar_url,
-              role: "student",
+              role: "user",
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             })
@@ -48,7 +48,11 @@ export default function AuthCallback() {
 
             router.push("/onboarding")
           } else {
-            router.push("/dashboard")
+            if (existingUser.role === "admin") {
+              router.push("/dashboard/admin")
+            } else {
+              router.push("/dashboard")
+            }
           }
         } else {
           setError("No session found")

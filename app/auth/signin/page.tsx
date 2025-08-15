@@ -22,6 +22,47 @@ export default function SignInPage() {
       }
     }
     checkUser()
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_IN" && session?.user) {
+        // Check if user exists in the users table
+        const { data: existingUser, error: userError } = await supabase
+          .from("users")
+          .select("id, role, codeforces_handle, college_id")
+          .eq("id", session.user.id)
+          .single()
+
+        if (userError && userError.code !== "PGRST116") {
+          console.error("Error checking user:", userError)
+          return
+        }
+
+        if (!existingUser) {
+          // New user - insert into users table and redirect to onboarding
+          const { error: insertError } = await supabase.from("users").insert({
+            id: session.user.id,
+            email: session.user.email,
+            name: session.user.user_metadata?.full_name || session.user.email?.split("@")[0],
+            role: "student",
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+
+          if (insertError) {
+            console.error("Error creating user:", insertError)
+          }
+
+          router.replace("/onboarding")
+        } else {
+          // Existing user - redirect to dashboard
+          router.replace("/dashboard")
+        }
+      }
+    })
+
+    return () => subscription.unsubscribe()
   }, [router])
 
   const handleGoogleSignIn = async () => {

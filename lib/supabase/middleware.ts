@@ -11,16 +11,41 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.next()
   }
 
+  const res = NextResponse.next()
   const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-  // Handle auth callback
   const requestUrl = new URL(request.url)
   const code = requestUrl.searchParams.get("code")
 
   if (code) {
     await supabase.auth.exchangeCodeForSession(code)
-    return NextResponse.redirect(new URL("/onboarding", request.url))
+    // Let the callback page handle the redirect logic
+    return NextResponse.redirect(new URL("/auth/callback", request.url))
   }
 
-  return NextResponse.next()
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  const protectedRoutes = ["/dashboard", "/onboarding", "/profile", "/contests", "/leaderboard"]
+  const isProtectedRoute = protectedRoutes.some((route) => request.nextUrl.pathname.startsWith(route))
+
+  const authRoutes = ["/auth/signin"]
+  const isAuthRoute = authRoutes.some((route) => request.nextUrl.pathname.startsWith(route))
+
+  const isHomePage = request.nextUrl.pathname === "/"
+
+  if (isHomePage) {
+    return res
+  }
+
+  if (isProtectedRoute && !session) {
+    return NextResponse.redirect(new URL("/auth/signin", request.url))
+  }
+
+  if (isAuthRoute && session) {
+    return NextResponse.redirect(new URL("/dashboard", request.url))
+  }
+
+  return res
 }

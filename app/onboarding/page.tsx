@@ -1,6 +1,6 @@
 "use client"
 
-import { useSession } from "next-auth/react"
+import { useAuth } from "@/components/providers"
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
@@ -22,7 +22,7 @@ interface UserProfile {
 }
 
 export default function OnboardingPage() {
-  const { data: session, status } = useSession()
+  const { user, loading: authLoading } = useAuth()
   const router = useRouter()
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
@@ -44,16 +44,16 @@ export default function OnboardingPage() {
   const [savingProfile, setSavingProfile] = useState(false)
 
   useEffect(() => {
-    if (status === "unauthenticated") {
+    if (authLoading) return // Wait for auth to load
+
+    if (!user) {
       router.push("/auth/signin")
       return
     }
 
-    if (status === "authenticated") {
-      fetchUserProfile()
-      fetchColleges()
-    }
-  }, [status, router])
+    fetchUserProfile()
+    fetchColleges()
+  }, [user, authLoading, router])
 
   const fetchUserProfile = async () => {
     try {
@@ -208,7 +208,7 @@ export default function OnboardingPage() {
     }
   }
 
-  if (status === "loading" || loading) {
+  if (authLoading || loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-blue-900 flex items-center justify-center">
         <div className="text-center">
@@ -233,7 +233,9 @@ export default function OnboardingPage() {
             </h1>
           </Link>
           <div className="flex items-center space-x-4">
-            <span className="text-sm text-gray-300">Welcome, {session?.user?.name?.split(" ")[0]}!</span>
+            <span className="text-sm text-gray-300">
+              Welcome, {user?.user_metadata?.full_name?.split(" ")[0] || user?.email?.split("@")[0]}!
+            </span>
           </div>
         </div>
       </header>
