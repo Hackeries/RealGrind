@@ -27,8 +27,11 @@ export const useAuth = () => {
 function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
+    setMounted(true)
+
     // Get initial session
     const getInitialSession = async () => {
       const {
@@ -50,6 +53,10 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => subscription.unsubscribe()
   }, [])
+
+  if (!mounted) {
+    return <AuthContext.Provider value={{ user: null, loading: true }}>{children}</AuthContext.Provider>
+  }
 
   return <AuthContext.Provider value={{ user, loading }}>{children}</AuthContext.Provider>
 }
