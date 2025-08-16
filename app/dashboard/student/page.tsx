@@ -24,6 +24,8 @@ import {
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
+import ProgressHeatmap from "@/components/progress-heatmap"
+import RatingChart from "@/components/rating-chart"
 
 interface UserStats {
   user: {
@@ -366,9 +368,15 @@ export default function StudentDashboard() {
           </Card>
         </div>
 
+        {/* Progress Visualization Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <ProgressHeatmap userId={user?.id || ""} />
+          <RatingChart userId={user?.id || ""} currentRating={stats.user.currentRating} />
+        </div>
+
         {/* Main Sections */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Smart Recommendations */}
+          {/* Smart Recommendations - Enhanced */}
           <Card className="bg-gray-800/50 border-gray-600 hover:border-yellow-500/50 transition-all duration-300">
             <CardHeader>
               <CardTitle className="flex items-center space-x-2 text-white">
@@ -378,12 +386,26 @@ export default function StudentDashboard() {
                 <span>Smart Recommendations</span>
               </CardTitle>
               <CardDescription className="text-gray-400">
-                Personalized problems based on your skill level and weak areas
+                Problems within your rating range ({Math.max(800, stats.user.currentRating - 100)} -{" "}
+                {stats.user.currentRating + 200})
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Daily Challenge */}
+              <div className="p-4 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-lg border border-purple-500/30">
+                <div className="flex items-center space-x-2 mb-2">
+                  <Zap className="w-4 h-4 text-purple-400" />
+                  <span className="text-sm font-medium text-purple-300">Daily Challenge</span>
+                  <Badge variant="outline" className="text-xs border-purple-400 text-purple-300">
+                    +{stats.user.currentRating + 250}
+                  </Badge>
+                </div>
+                <p className="text-white font-medium">Two Pointers Advanced</p>
+                <p className="text-xs text-gray-400">Push your limits with this challenging problem</p>
+              </div>
+
               {stats.recommendations && stats.recommendations.length > 0 ? (
-                stats.recommendations.slice(0, 5).map((problem, index) => (
+                stats.recommendations.slice(0, 4).map((problem, index) => (
                   <div
                     key={problem.problem_id}
                     className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg hover:bg-gray-700/70 transition-colors"
@@ -526,19 +548,19 @@ export default function StudentDashboard() {
           </Card>
         </div>
 
-        {/* Additional Student Features */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
-          {/* Custom Practice Contest */}
+        {/* Quick Actions */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
+          {/* Start Practice Contest */}
           <Card className="bg-gray-800/50 border-gray-600 hover:border-green-500/50 transition-all duration-300">
             <CardHeader>
               <CardTitle className="flex items-center space-x-2 text-white">
                 <div className="w-8 h-8 bg-green-500/20 rounded-full flex items-center justify-center">
                   <Zap className="w-4 h-4 text-green-400" />
                 </div>
-                <span>Custom Practice Contest</span>
+                <span>Practice Contest</span>
               </CardTitle>
               <CardDescription className="text-gray-400">
-                Create personalized practice sessions with problems matching your skill level
+                Create a custom contest with rating range picker
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -551,26 +573,45 @@ export default function StudentDashboard() {
             </CardContent>
           </Card>
 
-          {/* Progress Analytics */}
+          {/* Join College Contest */}
+          <Card className="bg-gray-800/50 border-gray-600 hover:border-blue-500/50 transition-all duration-300">
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2 text-white">
+                <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center">
+                  <Users className="w-4 h-4 text-blue-400" />
+                </div>
+                <span>College Contest</span>
+              </CardTitle>
+              <CardDescription className="text-gray-400">Compete with students from your college</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Link href="/contests/college">
+                <Button className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700">
+                  Join College Contest
+                  <Users className="w-4 h-4 ml-2" />
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
+
+          {/* View Leaderboards */}
           <Card className="bg-gray-800/50 border-gray-600 hover:border-purple-500/50 transition-all duration-300">
             <CardHeader>
               <CardTitle className="flex items-center space-x-2 text-white">
                 <div className="w-8 h-8 bg-purple-500/20 rounded-full flex items-center justify-center">
                   <BarChart3 className="w-4 h-4 text-purple-400" />
                 </div>
-                <span>Progress Analytics</span>
+                <span>Leaderboards</span>
               </CardTitle>
-              <CardDescription className="text-gray-400">
-                Detailed analytics and visualizations to track your improvement over time
-              </CardDescription>
+              <CardDescription className="text-gray-400">View college and global rankings</CardDescription>
             </CardHeader>
             <CardContent>
-              <Link href="/analytics">
+              <Link href="/leaderboard">
                 <Button
                   variant="outline"
                   className="w-full border-gray-600 text-gray-300 hover:bg-gray-700 bg-transparent"
                 >
-                  View Analytics
+                  View Leaderboards
                   <BarChart3 className="w-4 h-4 ml-2" />
                 </Button>
               </Link>

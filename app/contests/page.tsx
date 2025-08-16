@@ -1,6 +1,6 @@
 "use client"
 
-import { useSession } from "next-auth/react"
+import { useAuth } from "@/components/providers"
 import { useEffect, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -22,6 +22,7 @@ import {
   Target,
   AlertCircle,
   FolderSyncIcon as Sync,
+  Zap,
 } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -52,7 +53,7 @@ interface CollegeContest {
 }
 
 export default function ContestsPage() {
-  const { data: session, status } = useSession()
+  const { user, loading: authLoading } = useAuth()
   const router = useRouter()
   const [contests, setContests] = useState<Contest[]>([])
   const [collegeContests, setCollegeContests] = useState<CollegeContest[]>([])
@@ -63,17 +64,17 @@ export default function ContestsPage() {
   const { toast } = useToast()
 
   useEffect(() => {
-    if (status === "unauthenticated") {
+    if (!authLoading && !user) {
       router.push("/auth/signin")
       return
     }
 
-    if (status === "authenticated") {
+    if (user) {
       fetchUserProfile()
       fetchContests()
       fetchCollegeContests()
     }
-  }, [status, router])
+  }, [user, authLoading, router])
 
   const fetchUserProfile = async () => {
     try {
@@ -197,7 +198,7 @@ export default function ContestsPage() {
     </Card>
   )
 
-  if (status === "loading") {
+  if (authLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
         <div className="text-center">
@@ -239,8 +240,8 @@ export default function ContestsPage() {
           </div>
           <div className="flex items-center space-x-4">
             <Avatar>
-              <AvatarImage src={session?.user?.image || ""} />
-              <AvatarFallback>{session?.user?.name?.[0] || "U"}</AvatarFallback>
+              <AvatarImage src={user?.user_metadata?.avatar_url || ""} />
+              <AvatarFallback>{user?.user_metadata?.full_name?.[0] || "U"}</AvatarFallback>
             </Avatar>
           </div>
         </div>
@@ -272,19 +273,32 @@ export default function ContestsPage() {
               <h2 className="text-3xl font-bold text-gray-800 mb-2">Contests</h2>
               <p className="text-gray-600">Participate in Codeforces contests and create college competitions</p>
             </div>
-            <Link href="/contests/create">
-              <Button className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 mt-4 md:mt-0">
-                <Plus className="w-4 h-4 mr-2" />
-                Create College Contest
-              </Button>
-            </Link>
+            <div className="flex items-center space-x-3 mt-4 md:mt-0">
+              <Link href="/contests/custom">
+                <Button
+                  variant="outline"
+                  className="border-purple-200 text-purple-700 hover:bg-purple-50 bg-transparent"
+                >
+                  <Zap className="w-4 h-4 mr-2" />
+                  Custom Practice
+                </Button>
+              </Link>
+              <Link href="/contests/create">
+                <Button className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create College Contest
+                </Button>
+              </Link>
+            </div>
           </div>
         </div>
 
         <Tabs defaultValue="codeforces" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="codeforces">Codeforces Contests</TabsTrigger>
-            <TabsTrigger value="college">College Contests</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="codeforces">Codeforces</TabsTrigger>
+            <TabsTrigger value="college">College</TabsTrigger>
+            <TabsTrigger value="national">National</TabsTrigger>
+            <TabsTrigger value="custom">Custom Practice</TabsTrigger>
           </TabsList>
 
           <TabsContent value="codeforces" className="space-y-6">
@@ -452,6 +466,42 @@ export default function ContestsPage() {
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent value="national" className="space-y-6">
+            <Card className="border-0 shadow-lg">
+              <CardContent className="p-12 text-center">
+                <Trophy className="w-16 h-16 text-orange-400 mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-gray-800 mb-2">National Contests</h3>
+                <p className="text-gray-600 mb-6">
+                  Compete with programmers from across the country in national-level competitions.
+                </p>
+                <Link href="/contests/national">
+                  <Button className="bg-gradient-to-r from-orange-600 to-red-600">
+                    <Trophy className="w-4 h-4 mr-2" />
+                    View National Contests
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="custom" className="space-y-6">
+            <Card className="border-0 shadow-lg">
+              <CardContent className="p-12 text-center">
+                <Zap className="w-16 h-16 text-purple-400 mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-gray-800 mb-2">Custom Practice Contests</h3>
+                <p className="text-gray-600 mb-6">
+                  Create personalized practice sessions with problems tailored to your skill level and preferences.
+                </p>
+                <Link href="/contests/custom">
+                  <Button className="bg-gradient-to-r from-purple-600 to-pink-600">
+                    <Zap className="w-4 h-4 mr-2" />
+                    Create Practice Contest
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>

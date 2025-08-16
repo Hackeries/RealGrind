@@ -1,9 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { requireAuth } from "@/lib/auth"
-import { FirestoreOperations, UserOperations } from "@/lib/firestore/operations"
-import { COLLECTIONS } from "@/lib/firestore/collections"
+import { createServerComponentClient } from "@supabase/auth-helpers-nextjs"
+import { cookies } from "next/headers"
 import { codeforcesAPI } from "@/lib/codeforces-api"
-import { CacheManager } from "@/lib/redis"
 import { nanoid } from "nanoid"
 
 export const dynamic = "force-dynamic"
@@ -11,23 +9,85 @@ export const dynamic = "force-dynamic"
 const VERIFICATION_PROBLEM_ID = "4A" // Fixed problem: Watermelon
 const TOKEN_EXPIRY_MINUTES = 10
 
+async function withRetry<T>(operation: () => Promise<T>, maxRetries = 2): Promise<T> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation()
+    } catch (error) {
+      if (attempt === maxRetries) {
+        throw error
+      }
+
+      const delay = Math.pow(2, attempt) * 1000
+      console.log(`[v0] CF verification retry attempt ${attempt + 1} after ${delay}ms`)
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  throw new Error("Max retries exceeded")
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const user = await requireAuth(request)
-    const { handle } = await request.json()
+    const supabase = createServerComponentClient({ cookies })
 
-    if (!handle || typeof handle !== "string") {
-      return NextResponse.json({ error: "Invalid handle" }, { status: 400 })
+    const {
+      data: { user: authUser },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !authUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Validate handle exists on Codeforces
-    const isValid = await codeforcesAPI.validateHandle(handle)
+    let requestData
+    try {
+      requestData = await request.json()
+    } catch (error) {
+      return NextResponse.json({ error: "Invalid JSON in request body" }, { status: 400 })
+    }
+
+    const { handle } = requestData
+
+    if (!handle || typeof handle !== "string" || handle.trim().length === 0) {
+      return NextResponse.json({ error: "Valid Codeforces handle is required" }, { status: 400 })
+    }
+
+    const cleanHandle = handle.trim()
+
+    let isValid = false
+    try {
+      isValid = await withRetry(() => codeforcesAPI.validateHandle(cleanHandle))
+    } catch (error) {
+      console.error("Failed to validate Codeforces handle:", error)
+      return NextResponse.json(
+        {
+          error: "Unable to verify Codeforces handle",
+          details: "Codeforces API is temporarily unavailable. Please try again later.",
+        },
+        { status: 503 },
+      )
+    }
+
     if (!isValid) {
       return NextResponse.json({ error: "Codeforces handle not found" }, { status: 400 })
     }
 
-    const existingUser = await UserOperations.getUserByCodeforcesHandle(handle)
-    if (existingUser && existingUser.id !== user.id) {
+    const { data: existingUser, error: checkError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("codeforces_handle", cleanHandle)
+      .neq("id", authUser.id)
+      .single()
+
+    if (checkError && checkError.code !== "PGRST116") {
+      console.error("Error checking existing handle:", checkError)
+      return NextResponse.json(
+        { error: "Failed to verify handle availability", details: checkError.message },
+        { status: 500 },
+      )
+    }
+
+    if (existingUser) {
       return NextResponse.json({ error: "This handle is already verified by another user" }, { status: 400 })
     }
 
@@ -35,18 +95,23 @@ export async function POST(request: NextRequest) {
     const token = `REALGRIND-VERIFY-${nanoid(8).toUpperCase()}`
     const expiresAt = new Date(Date.now() + TOKEN_EXPIRY_MINUTES * 60 * 1000)
 
-    await FirestoreOperations.create(COLLECTIONS.VERIFICATION_TOKENS, {
-      userId: user.id,
-      handle,
+    const { error: tokenError } = await supabase.from("verification_tokens").insert({
+      user_id: authUser.id,
+      handle: cleanHandle,
       token,
-      problemId: VERIFICATION_PROBLEM_ID,
-      expiresAt,
+      problem_id: VERIFICATION_PROBLEM_ID,
+      expires_at: expiresAt.toISOString(),
       used: false,
-      createdAt: new Date(),
+      created_at: new Date().toISOString(),
     })
 
-    // Cache token for quick lookup
-    await CacheManager.set(`verify_token:${token}`, { userId: user.id, handle }, { ttl: TOKEN_EXPIRY_MINUTES * 60 })
+    if (tokenError) {
+      console.error("Error creating verification token:", tokenError)
+      return NextResponse.json(
+        { error: "Failed to create verification token", details: tokenError.message },
+        { status: 500 },
+      )
+    }
 
     const verificationCode = `// ${token}
 #error ${token}
@@ -63,7 +128,7 @@ int main(){}
     return NextResponse.json({
       success: true,
       token,
-      handle,
+      handle: cleanHandle,
       problemId: VERIFICATION_PROBLEM_ID,
       problemUrl: "https://codeforces.com/problemset/problem/4/A",
       verificationCode,

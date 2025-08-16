@@ -6,6 +6,23 @@ import { codeforcesAPI } from "@/lib/codeforces-api"
 
 export const dynamic = "force-dynamic"
 
+async function withRetry<T>(operation: () => Promise<T>, maxRetries = 3): Promise<T> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation()
+    } catch (error) {
+      if (attempt === maxRetries) {
+        throw error
+      }
+
+      const delay = Math.pow(2, attempt) * 1000
+      console.log(`[v0] Retry attempt ${attempt + 1} after ${delay}ms`)
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  throw new Error("Max retries exceeded")
+}
+
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession()
@@ -16,81 +33,130 @@ export async function POST(request: NextRequest) {
     const supabase = createServerComponentClient({ cookies })
     const { codeforcesHandle } = await request.json()
 
-    if (!codeforcesHandle) {
-      return NextResponse.json({ error: "Codeforces handle is required" }, { status: 400 })
+    if (!codeforcesHandle || typeof codeforcesHandle !== "string" || codeforcesHandle.trim().length === 0) {
+      return NextResponse.json({ error: "Valid Codeforces handle is required" }, { status: 400 })
     }
 
     // Get user ID
-    const { data: user } = await supabase.from("users").select("id").eq("email", session.user.email).single()
+    const { data: user, error: userError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("email", session.user.email)
+      .single()
 
-    if (!user) {
+    if (userError || !user) {
+      console.error("User lookup error:", userError)
       return NextResponse.json({ error: "User not found" }, { status: 404 })
     }
 
-    // Verify the handle exists and get user info
-    const cfUser = await codeforcesAPI.getUserInfo(codeforcesHandle)
+    let cfUser, submissions, ratings
+
+    try {
+      // Verify the handle exists and get user info with retry
+      cfUser = await withRetry(() => codeforcesAPI.getUserInfo(codeforcesHandle.trim()))
+    } catch (error) {
+      console.error("Failed to get Codeforces user info:", error)
+      return NextResponse.json(
+        {
+          error: "Invalid Codeforces handle or Codeforces API is unavailable",
+          details: error instanceof Error ? error.message : "Unknown error",
+        },
+        { status: 400 },
+      )
+    }
+
+    try {
+      // Sync user submissions with retry
+      submissions = await withRetry(() => codeforcesAPI.getUserSubmissions(codeforcesHandle.trim()))
+    } catch (error) {
+      console.error("Failed to get submissions:", error)
+      submissions = [] // Continue with empty submissions if this fails
+    }
+
+    try {
+      // Sync contest participation with retry
+      ratings = await withRetry(() => codeforcesAPI.getUserRating(codeforcesHandle.trim()))
+    } catch (error) {
+      console.error("Failed to get ratings:", error)
+      ratings = [] // Continue with empty ratings if this fails
+    }
+
+    const updates = []
 
     // Update user with Codeforces data
-    const { error: updateError } = await supabase
+    const userUpdate = supabase
       .from("users")
       .update({
-        codeforces_handle: codeforcesHandle,
+        codeforces_handle: codeforcesHandle.trim(),
         current_rating: cfUser.rating || 0,
         max_rating: cfUser.maxRating || 0,
         updated_at: new Date().toISOString(),
       })
       .eq("id", user.id)
 
-    if (updateError) throw updateError
-
-    // Sync user submissions
-    const submissions = await codeforcesAPI.getUserSubmissions(codeforcesHandle)
+    updates.push(userUpdate)
 
     // Count solved problems (AC submissions)
     const solvedProblems = new Set()
 
-    for (const submission of submissions) {
-      // Track solved problems
-      if (submission.verdict === "OK") {
-        solvedProblems.add(`${submission.problem.contestId || "problemset"}-${submission.problem.index}`)
+    if (submissions && Array.isArray(submissions)) {
+      for (const submission of submissions) {
+        if (submission.verdict === "OK" && submission.problem) {
+          solvedProblems.add(`${submission.problem.contestId || "problemset"}-${submission.problem.index}`)
+        }
       }
+
+      // Update user's problems solved count
+      const solvedUpdate = supabase
+        .from("users")
+        .update({
+          problems_solved: solvedProblems.size,
+        })
+        .eq("id", user.id)
+
+      updates.push(solvedUpdate)
     }
 
-    // Update user's problems solved count
-    const { error: solvedError } = await supabase
-      .from("users")
-      .update({
-        problems_solved: solvedProblems.size,
-      })
-      .eq("id", user.id)
-
-    if (solvedError) throw solvedError
-
-    // Sync contest participation
-    const ratings = await codeforcesAPI.getUserRating(codeforcesHandle)
-
     // Update contests participated count
-    const { error: contestError } = await supabase
-      .from("users")
-      .update({
-        contests_participated: ratings.length,
-      })
-      .eq("id", user.id)
+    if (ratings && Array.isArray(ratings)) {
+      const contestUpdate = supabase
+        .from("users")
+        .update({
+          contests_participated: ratings.length,
+        })
+        .eq("id", user.id)
 
-    if (contestError) throw contestError
+      updates.push(contestUpdate)
+    }
+
+    // Execute all updates
+    const results = await Promise.allSettled(updates)
+    const failures = results.filter((result) => result.status === "rejected")
+
+    if (failures.length > 0) {
+      console.error("Some database updates failed:", failures)
+      // Continue anyway - partial sync is better than no sync
+    }
 
     return NextResponse.json({
       success: true,
       data: {
-        handle: codeforcesHandle,
+        handle: codeforcesHandle.trim(),
         rating: cfUser.rating || 0,
         maxRating: cfUser.maxRating || 0,
         problemsSolved: solvedProblems.size,
-        contestsParticipated: ratings.length,
+        contestsParticipated: ratings?.length || 0,
       },
+      warnings: failures.length > 0 ? "Some data may not have been fully synced" : undefined,
     })
   } catch (error) {
     console.error("Sync error:", error)
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Sync failed" }, { status: 500 })
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Sync failed",
+        details: "Please try again later or contact support if the issue persists",
+      },
+      { status: 500 },
+    )
   }
 }

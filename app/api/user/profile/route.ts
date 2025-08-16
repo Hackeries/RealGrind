@@ -1,26 +1,59 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "@/lib/auth"
-import { UserOperations, CollegeOperations } from "@/lib/firestore/operations"
+import { createServerComponentClient } from "@supabase/auth-helpers-nextjs"
+import { cookies } from "next/headers"
 
 export const dynamic = "force-dynamic"
 
 export async function PUT(request: NextRequest) {
   try {
-    const session = await getServerSession(request)
-    if (!session?.user) {
+    const supabase = createServerComponentClient({ cookies })
+
+    const {
+      data: { user: authUser },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const { collegeId, graduationYear, codeforcesHandle } = await request.json()
+    let requestData
+    try {
+      requestData = await request.json()
+    } catch (error) {
+      return NextResponse.json({ error: "Invalid JSON in request body" }, { status: 400 })
+    }
 
-    await UserOperations.updateUser(session.user.id, {
-      collegeId: collegeId || undefined,
-      graduationYear: graduationYear || undefined,
-      codeforcesHandle: codeforcesHandle || undefined,
-      updatedAt: new Date(),
-    })
+    const { collegeId, graduationYear, codeforcesHandle } = requestData
 
-    const updatedUser = await UserOperations.getUserById(session.user.id)
+    // Validate input data
+    if (graduationYear && (typeof graduationYear !== "number" || graduationYear < 2020 || graduationYear > 2030)) {
+      return NextResponse.json({ error: "Invalid graduation year" }, { status: 400 })
+    }
+
+    if (codeforcesHandle && (typeof codeforcesHandle !== "string" || codeforcesHandle.trim().length === 0)) {
+      return NextResponse.json({ error: "Invalid Codeforces handle" }, { status: 400 })
+    }
+
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
+    }
+
+    if (collegeId !== undefined) updateData.college_id = collegeId
+    if (graduationYear !== undefined) updateData.graduation_year = graduationYear
+    if (codeforcesHandle !== undefined) updateData.codeforces_handle = codeforcesHandle?.trim()
+
+    const { data: updatedUser, error: updateError } = await supabase
+      .from("users")
+      .update(updateData)
+      .eq("id", authUser.id)
+      .select("*")
+      .single()
+
+    if (updateError) {
+      console.error("Profile update error:", updateError)
+      return NextResponse.json({ error: "Failed to update profile", details: updateError.message }, { status: 500 })
+    }
 
     return NextResponse.json({ success: true, user: updatedUser })
   } catch (error) {
@@ -34,29 +67,54 @@ export async function PUT(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getServerSession(request)
-    if (!session?.user) {
+    const supabase = createServerComponentClient({ cookies })
+
+    const {
+      data: { user: authUser },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const user = await UserOperations.getUserById(session.user.id)
+    const { data: user, error: userError } = await supabase
+      .from("users")
+      .select(
+        `
+        id,
+        email,
+        name,
+        codeforces_handle,
+        graduation_year,
+        role,
+        college_id,
+        colleges (
+          id,
+          name,
+          state,
+          city
+        )
+      `,
+      )
+      .eq("id", authUser.id)
+      .single()
 
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 })
-    }
-
-    let college = null
-    if (user.collegeId) {
-      college = await CollegeOperations.getCollegeById(user.collegeId)
+    if (userError) {
+      console.error("User fetch error:", userError)
+      if (userError.code === "PGRST116") {
+        return NextResponse.json({ error: "User not found" }, { status: 404 })
+      }
+      return NextResponse.json({ error: "Failed to fetch profile", details: userError.message }, { status: 500 })
     }
 
     const response = {
       id: user.id,
       email: user.email,
       name: user.name,
-      codeforcesHandle: user.codeforcesHandle,
-      graduationYear: user.graduationYear,
-      college: college,
+      codeforcesHandle: user.codeforces_handle,
+      graduationYear: user.graduation_year,
+      college: user.colleges,
       role: user.role,
     }
 

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Trophy, Medal, Award, TrendingUp, Clock, Target } from "lucide-react"
+import { Trophy, Medal, Award, TrendingUp, Clock, Target, RefreshCw, AlertCircle, Wifi, WifiOff } from "lucide-react"
 import { formatRating, getRankColor, getTimeAgo } from "@/lib/codeforces-api"
 
 interface LeaderboardEntry {
@@ -39,11 +39,35 @@ interface LeaderboardProps {
   title?: string
 }
 
+const LeaderboardSkeleton = () => (
+  <div className="flex items-center space-x-4 p-4 rounded-lg border animate-pulse">
+    <Skeleton className="w-8 h-8 rounded-full flex-shrink-0" />
+    <Skeleton className="w-10 h-10 rounded-full flex-shrink-0" />
+    <div className="flex-1 space-y-2">
+      <div className="flex items-center gap-2">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-4 w-16" />
+      </div>
+      <div className="flex items-center gap-4">
+        <Skeleton className="h-3 w-12" />
+        <Skeleton className="h-3 w-40" />
+        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-3 w-16" />
+      </div>
+    </div>
+    <div className="text-right space-y-1">
+      <Skeleton className="h-5 w-16 ml-auto" />
+      <Skeleton className="h-3 w-20 ml-auto" />
+    </div>
+  </div>
+)
+
 export function Leaderboard({ type = "national", collegeId, state, userId, title }: LeaderboardProps) {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [currentType, setCurrentType] = useState(type)
+  const [retryCount, setRetryCount] = useState(0)
   const [pagination, setPagination] = useState({
     total: 0,
     limit: 50,
@@ -51,9 +75,11 @@ export function Leaderboard({ type = "national", collegeId, state, userId, title
     hasMore: false,
   })
 
-  const fetchLeaderboard = async (loadMore = false) => {
+  const fetchLeaderboard = async (loadMore = false, isRetry = false) => {
     try {
-      setLoading(true)
+      if (!loadMore) setLoading(true)
+      setError(null)
+
       const params = new URLSearchParams({
         type: currentType,
         limit: pagination.limit.toString(),
@@ -78,9 +104,20 @@ export function Leaderboard({ type = "national", collegeId, state, userId, title
       }
 
       setPagination(data.pagination)
-      setError(null)
+      setRetryCount(0) // Reset retry count on success
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load leaderboard")
+      const errorMessage = err instanceof Error ? err.message : "Failed to load leaderboard"
+      setError(errorMessage)
+
+      if (!isRetry && retryCount < 2 && errorMessage.includes("fetch")) {
+        setTimeout(
+          () => {
+            setRetryCount((prev) => prev + 1)
+            fetchLeaderboard(loadMore, true)
+          },
+          1000 * (retryCount + 1),
+        )
+      }
     } finally {
       setLoading(false)
     }
@@ -109,19 +146,6 @@ export function Leaderboard({ type = "national", collegeId, state, userId, title
     return colors[tier as keyof typeof colors] || colors.OTHER
   }
 
-  if (error) {
-    return (
-      <Card>
-        <CardContent className="p-6 text-center">
-          <p className="text-destructive">{error}</p>
-          <Button onClick={() => fetchLeaderboard()} className="mt-4">
-            Try Again
-          </Button>
-        </CardContent>
-      </Card>
-    )
-  }
-
   return (
     <Card>
       <CardHeader>
@@ -130,40 +154,93 @@ export function Leaderboard({ type = "national", collegeId, state, userId, title
             <CardTitle className="flex items-center gap-2">
               <Trophy className="w-5 h-5 text-primary" />
               {title || `${currentType.charAt(0).toUpperCase() + currentType.slice(1)} Leaderboard`}
+              {!loading && !error && (
+                <div className="flex items-center gap-1 text-xs text-green-600">
+                  <Wifi className="w-3 h-3" />
+                  <span>Live</span>
+                </div>
+              )}
+              {error && (
+                <div className="flex items-center gap-1 text-xs text-red-600">
+                  <WifiOff className="w-3 h-3" />
+                  <span>Offline</span>
+                </div>
+              )}
             </CardTitle>
-            <CardDescription>Top competitive programmers ranked by rating</CardDescription>
+            <CardDescription>
+              Top competitive programmers ranked by rating
+              {pagination.total > 0 && ` (${pagination.total} total)`}
+            </CardDescription>
           </div>
-          {!collegeId && !state && !userId && (
-            <Select value={currentType} onValueChange={(value: any) => setCurrentType(value)}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="national">National</SelectItem>
-                <SelectItem value="college">College</SelectItem>
-                <SelectItem value="state">State</SelectItem>
-                <SelectItem value="friends">Friends</SelectItem>
-              </SelectContent>
-            </Select>
-          )}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => fetchLeaderboard()}
+              disabled={loading}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+            {!collegeId && !state && !userId && (
+              <Select value={currentType} onValueChange={(value: any) => setCurrentType(value)}>
+                <SelectTrigger className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="national">National</SelectItem>
+                  <SelectItem value="college">College</SelectItem>
+                  <SelectItem value="state">State</SelectItem>
+                  <SelectItem value="friends">Friends</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
           {loading && leaderboard.length === 0 ? (
-            Array.from({ length: 10 }).map((_, i) => (
-              <div key={i} className="flex items-center space-x-4 p-4 rounded-lg border">
-                <Skeleton className="w-8 h-8 rounded-full" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-48" />
-                  <Skeleton className="h-3 w-32" />
-                </div>
-                <Skeleton className="h-6 w-16" />
+            <div className="space-y-4">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <LeaderboardSkeleton key={i} />
+              ))}
+            </div>
+          ) : error ? (
+            <div className="text-center py-12">
+              <AlertCircle className="w-16 h-16 text-red-400 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-800 mb-2">Unable to Load Leaderboard</h3>
+              <p className="text-gray-600 mb-4">{error}</p>
+              {retryCount > 0 && <p className="text-sm text-gray-500 mb-4">Retrying... (Attempt {retryCount + 1}/3)</p>}
+              <div className="flex justify-center gap-2">
+                <Button onClick={() => fetchLeaderboard()} disabled={loading}>
+                  <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+                  Try Again
+                </Button>
+                {error.includes("network") && (
+                  <Button variant="outline" onClick={() => window.location.reload()}>
+                    Reload Page
+                  </Button>
+                )}
               </div>
-            ))
+            </div>
+          ) : leaderboard.length === 0 ? (
+            <div className="text-center py-12">
+              <Trophy className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-800 mb-2">No Rankings Available</h3>
+              <p className="text-gray-600 mb-4">
+                {currentType === "friends"
+                  ? "Add friends to see their rankings here"
+                  : `No ${currentType} rankings found. Check back later!`}
+              </p>
+              <Button variant="outline" onClick={() => fetchLeaderboard()}>
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Refresh
+              </Button>
+            </div>
           ) : (
             <>
-              {leaderboard.map((entry) => (
+              {leaderboard.map((entry, index) => (
                 <div
                   key={entry.id}
                   className="flex items-center space-x-4 p-4 rounded-lg border hover:bg-muted/50 transition-colors"
@@ -217,7 +294,14 @@ export function Leaderboard({ type = "national", collegeId, state, userId, title
               {pagination.hasMore && (
                 <div className="text-center pt-4">
                   <Button onClick={() => fetchLeaderboard(true)} disabled={loading} variant="outline">
-                    {loading ? "Loading..." : "Load More"}
+                    {loading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Loading...
+                      </>
+                    ) : (
+                      `Load More (${pagination.total - leaderboard.length} remaining)`
+                    )}
                   </Button>
                 </div>
               )}

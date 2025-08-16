@@ -5,6 +5,23 @@ import { CacheManager } from "@/lib/redis"
 
 export const dynamic = "force-dynamic"
 
+async function withRetry<T>(operation: () => Promise<T>, maxRetries = 2): Promise<T> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation()
+    } catch (error) {
+      if (attempt === maxRetries) {
+        throw error
+      }
+
+      const delay = Math.pow(2, attempt) * 1000
+      console.log(`[v0] Recommendations retry attempt ${attempt + 1} after ${delay}ms`)
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  throw new Error("Max retries exceeded")
+}
+
 export async function GET(request: NextRequest) {
   try {
     const user = await requireAuth(request)
@@ -15,56 +32,107 @@ export async function GET(request: NextRequest) {
 
     // Check cache first
     const cacheKey = CacheManager.getRecommendationKey(user.id)
-    const cached = await CacheManager.get<any[]>(cacheKey)
+    let cached
 
-    if (cached) {
-      return NextResponse.json({
-        recommendations: cached,
-        count: cached.length,
-        personalized: true,
-        cached: true,
-        message: "Recommendations loaded from cache",
-      })
+    try {
+      cached = await CacheManager.get<any[]>(cacheKey)
+      if (cached) {
+        return NextResponse.json({
+          recommendations: cached,
+          count: cached.length,
+          personalized: true,
+          cached: true,
+          message: "Recommendations loaded from cache",
+        })
+      }
+    } catch (cacheError) {
+      console.error("Cache read error:", cacheError)
+      // Continue without cache
     }
 
-    // Get user's current rating
-    const userStats = await codeforcesAPI.getUserStats(user.codeforcesHandle)
-    const userRating = userStats.currentRating || 800
+    let userStats, solvedProblems, problemsData
+
+    try {
+      // Get user's current rating with retry
+      userStats = await withRetry(() => codeforcesAPI.getUserStats(user.codeforcesHandle))
+    } catch (error) {
+      console.error("Failed to get user stats:", error)
+      // Use fallback rating based on user's stored rating
+      userStats = {
+        currentRating: user.current_rating || 800,
+        tagDistribution: {},
+      }
+    }
+
+    const userRating = userStats.currentRating || user.current_rating || 800
 
     // Define rating range
     const ratingMin = Math.max(800, userRating - 100)
     const ratingMax = userRating + 200
 
-    // Get user's solved problems
+    // Get user's solved problems with caching and retry
     const solvedKey = CacheManager.getUserSolvedKey(user.codeforcesHandle)
-    let solvedProblems = new Set<string>()
+    solvedProblems = new Set<string>()
 
-    const cachedSolved = await CacheManager.get<string[]>(solvedKey)
-    if (cachedSolved) {
-      solvedProblems = new Set(cachedSolved)
-    } else {
-      const submissions = await codeforcesAPI.getUserSubmissions(user.codeforcesHandle)
-      const solved = submissions
-        .filter((s) => s.verdict === "OK")
-        .map((s) => `${s.problem.contestId}-${s.problem.index}`)
+    try {
+      const cachedSolved = await CacheManager.get<string[]>(solvedKey)
+      if (cachedSolved) {
+        solvedProblems = new Set(cachedSolved)
+      } else {
+        const submissions = await withRetry(() => codeforcesAPI.getUserSubmissions(user.codeforcesHandle))
+        const solved = submissions
+          .filter((s) => s.verdict === "OK" && s.problem)
+          .map((s) => `${s.problem.contestId}-${s.problem.index}`)
 
-      solvedProblems = new Set(solved)
-      await CacheManager.set(solvedKey, Array.from(solvedProblems), { ttl: 3600 })
+        solvedProblems = new Set(solved)
+
+        try {
+          await CacheManager.set(solvedKey, Array.from(solvedProblems), { ttl: 3600 })
+        } catch (cacheError) {
+          console.error("Cache write error:", cacheError)
+        }
+      }
+    } catch (error) {
+      console.error("Failed to get solved problems:", error)
+      // Continue with empty set - will show all problems as recommendations
     }
 
-    // Get problems from Codeforces
-    const problemsData = await codeforcesAPI.getProblems()
+    try {
+      // Get problems from Codeforces with retry
+      problemsData = await withRetry(() => codeforcesAPI.getProblems())
+    } catch (error) {
+      console.error("Failed to get problems:", error)
+      return NextResponse.json(
+        {
+          error: "Unable to fetch problems from Codeforces",
+          details: "Please try again later",
+          fallback: true,
+        },
+        { status: 503 },
+      )
+    }
+
+    if (!problemsData?.problems || !Array.isArray(problemsData.problems)) {
+      return NextResponse.json(
+        {
+          error: "Invalid problems data received",
+          details: "Please try again later",
+        },
+        { status: 503 },
+      )
+    }
+
     const candidates = problemsData.problems.filter((problem) => {
       const problemKey = `${problem.contestId}-${problem.index}`
       return (
-        !solvedProblems.has(problemKey) && problem.rating && problem.rating >= ratingMin && problem.rating <= ratingMax
+        problem.rating && problem.rating >= ratingMin && problem.rating <= ratingMax && !solvedProblems.has(problemKey)
       )
     })
 
     // Apply tag diversity and scoring
     const recommendations = []
     const tagCount: Record<string, number> = {}
-    const userTags = Object.keys(userStats.tagDistribution)
+    const userTags = Object.keys(userStats.tagDistribution || {})
 
     // Sort by rating for balanced difficulty progression
     candidates.sort((a, b) => (a.rating || 0) - (b.rating || 0))
@@ -73,7 +141,7 @@ export async function GET(request: NextRequest) {
       if (recommendations.length >= 10) break
 
       // Check tag diversity (max 2 per tag)
-      const canAdd = problem.tags.every((tag) => (tagCount[tag] || 0) < 2)
+      const canAdd = problem.tags?.every((tag) => (tagCount[tag] || 0) < 2) ?? true
 
       if (canAdd) {
         let reason = "Perfect for your current skill level"
@@ -89,7 +157,7 @@ export async function GET(request: NextRequest) {
         }
 
         // Check for new tags
-        const hasNewTag = problem.tags.some((tag) => !userTags.includes(tag))
+        const hasNewTag = problem.tags?.some((tag) => !userTags.includes(tag)) ?? false
         if (hasNewTag) {
           reason += " (explores new topics)"
         }
@@ -102,7 +170,7 @@ export async function GET(request: NextRequest) {
         })
 
         // Update tag counts
-        problem.tags.forEach((tag) => {
+        problem.tags?.forEach((tag) => {
           tagCount[tag] = (tagCount[tag] || 0) + 1
         })
       }
@@ -112,7 +180,7 @@ export async function GET(request: NextRequest) {
     const challengeRating = userRating + 250
     const challengeCandidates = problemsData.problems.filter((problem) => {
       const problemKey = `${problem.contestId}-${problem.index}`
-      return !solvedProblems.has(problemKey) && problem.rating && Math.abs(problem.rating - challengeRating) <= 50
+      return problem.rating && Math.abs(problem.rating - challengeRating) <= 50 && !solvedProblems.has(problemKey)
     })
 
     if (challengeCandidates.length > 0) {
@@ -127,7 +195,11 @@ export async function GET(request: NextRequest) {
     }
 
     // Cache recommendations for 24 hours
-    await CacheManager.set(cacheKey, recommendations, { ttl: 24 * 60 * 60 })
+    try {
+      await CacheManager.set(cacheKey, recommendations, { ttl: 24 * 60 * 60 })
+    } catch (cacheError) {
+      console.error("Cache write error:", cacheError)
+    }
 
     return NextResponse.json({
       recommendations,
@@ -141,7 +213,10 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Recommendations API error:", error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to generate recommendations" },
+      {
+        error: error instanceof Error ? error.message : "Failed to generate recommendations",
+        details: "Please try again later or contact support if the issue persists",
+      },
       { status: 500 },
     )
   }

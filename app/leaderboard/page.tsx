@@ -1,6 +1,6 @@
 "use client"
 
-import { useSession } from "next-auth/react"
+import { useAuth } from "@/components/providers"
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -23,6 +23,9 @@ import {
   Target,
   BarChart3,
   AlertCircle,
+  Filter,
+  TrendingUp,
+  Award,
 } from "lucide-react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -68,7 +71,7 @@ interface CollegeStudent {
 }
 
 export default function LeaderboardPage() {
-  const { data: session, status } = useSession()
+  const { user, loading: authLoading } = useAuth()
   const router = useRouter()
   const [collegeRankings, setCollegeRankings] = useState<CollegeRanking[]>([])
   const [userCollege, setUserCollege] = useState<UserCollege | null>(null)
@@ -78,23 +81,32 @@ export default function LeaderboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [sortBy, setSortBy] = useState("current_rating")
   const [searchQuery, setSearchQuery] = useState("")
+  const [timeFilter, setTimeFilter] = useState("all-time")
+  const [ratingFilter, setRatingFilter] = useState("all")
+  const [tierFilter, setTierFilter] = useState("all")
   const { toast } = useToast()
 
   useEffect(() => {
-    if (status === "unauthenticated") {
+    if (!authLoading && !user) {
       router.push("/auth/signin")
       return
     }
 
-    if (status === "authenticated") {
+    if (user) {
       fetchLeaderboards()
     }
-  }, [status, router, sortBy])
+  }, [user, authLoading, router, sortBy, timeFilter, ratingFilter, tierFilter])
 
   const fetchLeaderboards = async () => {
     try {
       setError(null)
-      const response = await fetch(`/api/leaderboard?sortBy=${sortBy}`)
+      const params = new URLSearchParams({
+        sortBy,
+        timeFilter,
+        ratingFilter,
+        tierFilter,
+      })
+      const response = await fetch(`/api/leaderboard?${params}`)
       if (!response.ok) {
         throw new Error(`Failed to fetch leaderboards: ${response.status}`)
       }
@@ -199,7 +211,7 @@ export default function LeaderboardPage() {
       student.codeforces_handle.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
-  if (status === "loading" || loading) {
+  if (authLoading || loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
         <div className="text-center">
@@ -282,8 +294,8 @@ export default function LeaderboardPage() {
               <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
             </Button>
             <Avatar>
-              <AvatarImage src={session?.user?.image || ""} />
-              <AvatarFallback>{session?.user?.name?.[0] || "U"}</AvatarFallback>
+              <AvatarImage src={user?.user_metadata?.avatar_url || ""} />
+              <AvatarFallback>{user?.user_metadata?.full_name?.[0] || "U"}</AvatarFallback>
             </Avatar>
           </div>
         </div>
@@ -296,9 +308,9 @@ export default function LeaderboardPage() {
             <div>
               <h2 className="text-3xl font-bold text-gray-800 mb-2 flex items-center space-x-3">
                 <Trophy className="w-8 h-8 text-yellow-500" />
-                <span>College Rankings</span>
+                <span>Leaderboards & Analytics</span>
               </h2>
-              <p className="text-gray-600">Compare colleges and see how your college ranks</p>
+              <p className="text-gray-600">Compare performance across colleges, contests, and time periods</p>
             </div>
             <div className="flex items-center space-x-4 mt-4 md:mt-0">
               <div className="relative">
@@ -314,27 +326,93 @@ export default function LeaderboardPage() {
           </div>
         </div>
 
-        {/* Filters */}
-        <div className="flex flex-col md:flex-row gap-4 mb-8">
-          <Select value={sortBy} onValueChange={setSortBy}>
-            <SelectTrigger className="w-full md:w-48 bg-white">
-              <SelectValue placeholder="Sort by" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="current_rating">Average Rating</SelectItem>
-              <SelectItem value="max_rating">Average Max Rating</SelectItem>
-              <SelectItem value="problems_solved">Average Problems Solved</SelectItem>
-              <SelectItem value="contests_participated">Average Contests</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        {/* Enhanced Filters */}
+        <Card className="mb-8 border-0 shadow-lg">
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <Filter className="w-5 h-5" />
+              <span>Analytics Filters</span>
+            </CardTitle>
+            <CardDescription>Filter and analyze performance data across different dimensions</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">Sort By</label>
+                <Select value={sortBy} onValueChange={setSortBy}>
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="current_rating">Current Rating</SelectItem>
+                    <SelectItem value="max_rating">Peak Rating</SelectItem>
+                    <SelectItem value="problems_solved">Problems Solved</SelectItem>
+                    <SelectItem value="contests_participated">Contest Participation</SelectItem>
+                    <SelectItem value="recent_performance">Recent Performance</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">Time Period</label>
+                <Select value={timeFilter} onValueChange={setTimeFilter}>
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all-time">All Time</SelectItem>
+                    <SelectItem value="last-month">Last Month</SelectItem>
+                    <SelectItem value="last-3-months">Last 3 Months</SelectItem>
+                    <SelectItem value="last-6-months">Last 6 Months</SelectItem>
+                    <SelectItem value="this-year">This Year</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">Rating Range</label>
+                <Select value={ratingFilter} onValueChange={setRatingFilter}>
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Ratings</SelectItem>
+                    <SelectItem value="newbie">Newbie (0-1199)</SelectItem>
+                    <SelectItem value="pupil">Pupil (1200-1399)</SelectItem>
+                    <SelectItem value="specialist">Specialist (1400-1599)</SelectItem>
+                    <SelectItem value="expert">Expert (1600-1899)</SelectItem>
+                    <SelectItem value="cm">Candidate Master (1900-2099)</SelectItem>
+                    <SelectItem value="master">Master (2100+)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">College Tier</label>
+                <Select value={tierFilter} onValueChange={setTierFilter}>
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Tiers</SelectItem>
+                    <SelectItem value="1">Tier 1</SelectItem>
+                    <SelectItem value="2">Tier 2</SelectItem>
+                    <SelectItem value="3">Tier 3</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         <Tabs defaultValue="colleges" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="colleges">Overall College Rankings</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="colleges">College Rankings</TabsTrigger>
             <TabsTrigger value="own-college" disabled={!userCollege}>
-              {userCollege ? `${userCollege.short_name || userCollege.name} Rankings` : "Your College Rankings"}
+              {userCollege ? `${userCollege.short_name || userCollege.name}` : "Your College"}
             </TabsTrigger>
+            <TabsTrigger value="analytics">Performance Analytics</TabsTrigger>
+            <TabsTrigger value="trends">Trending Stats</TabsTrigger>
           </TabsList>
 
           <TabsContent value="colleges" className="space-y-6">
@@ -473,7 +551,7 @@ export default function LeaderboardPage() {
                 <CardContent>
                   <div className="space-y-4">
                     {filteredOwnCollegeRanking.map((student) => {
-                      const isCurrentUser = student.email === session?.user?.email
+                      const isCurrentUser = student.email === user?.email
 
                       return (
                         <div
@@ -537,6 +615,166 @@ export default function LeaderboardPage() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          <TabsContent value="analytics" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card className="border-0 shadow-lg">
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <BarChart3 className="w-5 h-5 text-blue-600" />
+                    <span>Rating Distribution</span>
+                  </CardTitle>
+                  <CardDescription>Distribution of students across rating ranges</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {[
+                      { range: "2100+", label: "Master+", count: 45, color: "bg-red-500" },
+                      { range: "1900-2099", label: "Candidate Master", count: 128, color: "bg-purple-500" },
+                      { range: "1600-1899", label: "Expert", count: 342, color: "bg-blue-500" },
+                      { range: "1400-1599", label: "Specialist", count: 567, color: "bg-cyan-500" },
+                      { range: "1200-1399", label: "Pupil", count: 823, color: "bg-green-500" },
+                      { range: "0-1199", label: "Newbie", count: 1205, color: "bg-gray-500" },
+                    ].map((item) => (
+                      <div key={item.range} className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <div className={`w-4 h-4 rounded ${item.color}`}></div>
+                          <span className="font-medium">{item.label}</span>
+                          <span className="text-sm text-gray-500">({item.range})</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className="w-32 bg-gray-200 rounded-full h-2">
+                            <div
+                              className={`h-2 rounded-full ${item.color}`}
+                              style={{ width: `${(item.count / 1205) * 100}%` }}
+                            ></div>
+                          </div>
+                          <span className="text-sm font-medium w-12 text-right">{item.count}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-0 shadow-lg">
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Award className="w-5 h-5 text-green-600" />
+                    <span>Top Performers</span>
+                  </CardTitle>
+                  <CardDescription>Highest rated students across all colleges</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {[
+                      { name: "Arjun Kumar", college: "IIT Delhi", rating: 2456, rank: 1 },
+                      { name: "Priya Sharma", college: "IIT Bombay", rating: 2398, rank: 2 },
+                      { name: "Rahul Singh", college: "IIT Kanpur", rating: 2367, rank: 3 },
+                      { name: "Sneha Patel", college: "IIT Madras", rating: 2334, rank: 4 },
+                      { name: "Vikram Gupta", college: "IIT Kharagpur", rating: 2298, rank: 5 },
+                    ].map((student) => (
+                      <div key={student.rank} className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                        <div className="flex items-center space-x-3">
+                          {getRankIcon(student.rank)}
+                          <div>
+                            <div className="font-medium">{student.name}</div>
+                            <div className="text-sm text-gray-500">{student.college}</div>
+                          </div>
+                        </div>
+                        <div className={`font-bold ${getRatingColor(student.rating)}`}>{student.rating}</div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="trends" className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <Card className="border-0 shadow-lg">
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <TrendingUp className="w-5 h-5 text-green-600" />
+                    <span>Rising Stars</span>
+                  </CardTitle>
+                  <CardDescription>Students with highest rating gains this month</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {[
+                      { name: "Amit Verma", gain: "+156", college: "NIT Trichy" },
+                      { name: "Riya Jain", gain: "+134", college: "IIIT Hyderabad" },
+                      { name: "Karan Mehta", gain: "+128", college: "DTU" },
+                    ].map((student, index) => (
+                      <div key={index} className="flex items-center justify-between">
+                        <div>
+                          <div className="font-medium text-sm">{student.name}</div>
+                          <div className="text-xs text-gray-500">{student.college}</div>
+                        </div>
+                        <div className="text-green-600 font-bold">{student.gain}</div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-0 shadow-lg">
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Users className="w-5 h-5 text-blue-600" />
+                    <span>Most Active</span>
+                  </CardTitle>
+                  <CardDescription>Students with most contest participation</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {[
+                      { name: "Deepak Kumar", contests: 28, college: "IIT Roorkee" },
+                      { name: "Ananya Singh", contests: 25, college: "BITS Pilani" },
+                      { name: "Rohit Sharma", contests: 23, college: "VIT Vellore" },
+                    ].map((student, index) => (
+                      <div key={index} className="flex items-center justify-between">
+                        <div>
+                          <div className="font-medium text-sm">{student.name}</div>
+                          <div className="text-xs text-gray-500">{student.college}</div>
+                        </div>
+                        <div className="text-blue-600 font-bold">{student.contests}</div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-0 shadow-lg">
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Target className="w-5 h-5 text-purple-600" />
+                    <span>Problem Solvers</span>
+                  </CardTitle>
+                  <CardDescription>Most problems solved this month</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {[
+                      { name: "Sanjay Patel", problems: 89, college: "IIT Guwahati" },
+                      { name: "Meera Reddy", problems: 76, college: "IIIT Bangalore" },
+                      { name: "Arjun Nair", problems: 71, college: "NIT Calicut" },
+                    ].map((student, index) => (
+                      <div key={index} className="flex items-center justify-between">
+                        <div>
+                          <div className="font-medium text-sm">{student.name}</div>
+                          <div className="text-xs text-gray-500">{student.college}</div>
+                        </div>
+                        <div className="text-purple-600 font-bold">{student.problems}</div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </div>

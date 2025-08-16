@@ -3,7 +3,9 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Activity, Trophy, Target, TrendingUp, Award, Code } from "lucide-react"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@/components/ui/button"
+import { Activity, Trophy, Target, TrendingUp, Award, Code, RefreshCw, AlertCircle } from "lucide-react"
 import { useRealtimeActivities } from "@/hooks/use-realtime-firestore"
 import { useAuth } from "@/components/providers"
 
@@ -12,10 +14,31 @@ interface ActivityFeedProps {
   limit?: number
 }
 
+const ActivitySkeleton = () => (
+  <div className="flex items-start space-x-3 p-3 rounded-lg border bg-gray-50">
+    <Skeleton className="w-6 h-6 rounded-full flex-shrink-0 mt-1" />
+    <div className="flex-1 space-y-2">
+      <div className="flex items-center space-x-2">
+        <Skeleton className="w-6 h-6 rounded-full" />
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="h-4 w-16" />
+      </div>
+      <Skeleton className="h-4 w-3/4" />
+      <Skeleton className="h-3 w-1/2" />
+      <Skeleton className="h-3 w-16" />
+    </div>
+  </div>
+)
+
 export function ActivityFeed({ type = "global", limit = 20 }: ActivityFeedProps) {
   const { userDoc } = useAuth()
 
-  const { data: activities, loading, error } = useRealtimeActivities(type === "personal" ? userDoc?.id : undefined)
+  const {
+    data: activities,
+    loading,
+    error,
+    refetch,
+  } = useRealtimeActivities(type === "personal" ? userDoc?.id : undefined)
 
   const getActivityIcon = (activityType: string) => {
     switch (activityType) {
@@ -60,46 +83,65 @@ export function ActivityFeed({ type = "global", limit = 20 }: ActivityFeedProps)
     return date.toLocaleDateString()
   }
 
-  if (loading) {
-    return (
-      <Card className="border-0 shadow-lg">
-        <CardContent className="p-8 text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4" />
-          <p className="text-gray-600">Loading activities...</p>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  if (error) {
-    return (
-      <Card className="border-0 shadow-lg">
-        <CardContent className="p-8 text-center">
-          <p className="text-red-600">Error loading activities: {error}</p>
-        </CardContent>
-      </Card>
-    )
-  }
-
   return (
     <Card className="border-0 shadow-lg">
       <CardHeader>
-        <CardTitle className="flex items-center space-x-2">
-          <Activity className="w-5 h-5" />
-          <span>{type === "personal" ? "Your Activity" : "Recent Activity"}</span>
-          <div className="flex items-center space-x-2 text-sm text-gray-500">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <span>Live</span>
-          </div>
-        </CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center space-x-2">
+            <Activity className="w-5 h-5" />
+            <span>{type === "personal" ? "Your Activity" : "Recent Activity"}</span>
+            {!loading && !error && (
+              <div className="flex items-center space-x-2 text-sm text-gray-500">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <span>Live</span>
+              </div>
+            )}
+          </CardTitle>
+          {refetch && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={refetch}
+              disabled={loading}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
-        {activities.length === 0 ? (
+        {loading ? (
+          <div className="space-y-4">
+            {Array.from({ length: Math.min(limit, 5) }).map((_, i) => (
+              <ActivitySkeleton key={i} />
+            ))}
+          </div>
+        ) : error ? (
           <div className="text-center py-8">
-            <Activity className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-600">No recent activity</p>
+            <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-gray-800 mb-2">Failed to Load Activities</h3>
+            <p className="text-gray-600 mb-4">{error}</p>
+            {refetch && (
+              <Button onClick={refetch} variant="outline">
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Try Again
+              </Button>
+            )}
+          </div>
+        ) : activities.length === 0 ? (
+          <div className="text-center py-12">
+            <Activity className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-gray-800 mb-2">No Recent Activity</h3>
+            <p className="text-gray-600 mb-2">
+              {type === "personal"
+                ? "Start solving problems to see your activity here!"
+                : "Activities will appear here as users solve problems and participate in contests."}
+            </p>
             <p className="text-sm text-gray-500">
-              Activities will appear here as users solve problems and participate in contests.
+              {type === "personal"
+                ? "Your submissions and contest participations will be tracked automatically."
+                : "Check back soon for the latest community updates."}
             </p>
           </div>
         ) : (
@@ -107,7 +149,7 @@ export function ActivityFeed({ type = "global", limit = 20 }: ActivityFeedProps)
             {activities.slice(0, limit).map((activity: any) => (
               <div
                 key={activity.id}
-                className={`flex items-start space-x-3 p-3 rounded-lg border ${getActivityColor(activity.type)}`}
+                className={`flex items-start space-x-3 p-3 rounded-lg border transition-colors hover:shadow-sm ${getActivityColor(activity.type)}`}
               >
                 <div className="flex-shrink-0 mt-1">{getActivityIcon(activity.type)}</div>
                 <div className="flex-1 min-w-0">

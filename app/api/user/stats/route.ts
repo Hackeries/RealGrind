@@ -1,20 +1,41 @@
 import { NextResponse } from "next/server"
-import { getServerSession } from "@/lib/auth"
 import { createServerComponentClient } from "@supabase/auth-helpers-nextjs"
 import { cookies } from "next/headers"
+import { codeforcesAPI } from "@/lib/codeforces-api"
 
 export const dynamic = "force-dynamic"
 
+async function withRetry<T>(operation: () => Promise<T>, maxRetries = 2): Promise<T> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation()
+    } catch (error) {
+      if (attempt === maxRetries) {
+        throw error
+      }
+
+      const delay = Math.pow(2, attempt) * 1000
+      console.log(`[v0] User stats retry attempt ${attempt + 1} after ${delay}ms`)
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+  throw new Error("Max retries exceeded")
+}
+
 export async function GET() {
   try {
-    const session = await getServerSession()
-    if (!session?.user?.email) {
+    const supabase = createServerComponentClient({ cookies })
+
+    const {
+      data: { user: authUser },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !authUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const supabase = createServerComponentClient({ cookies })
-
-    // Get user basic stats
+    // Get user basic stats from database
     const { data: user, error } = await supabase
       .from("users")
       .select(`
@@ -27,48 +48,88 @@ export async function GET() {
         graduation_year,
         colleges (name)
       `)
-      .eq("email", session.user.email)
+      .eq("id", authUser.id)
       .single()
 
     if (error || !user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 })
     }
 
-    // Mock data for other stats since we don't have the full database structure yet
-    const difficultyStats = [
-      { difficulty: "Beginner", solved_count: 45 },
-      { difficulty: "Pupil", solved_count: 32 },
-      { difficulty: "Specialist", solved_count: 18 },
-      { difficulty: "Expert", solved_count: 8 },
-    ]
+    let difficultyStats, tagStats, recentSubmissions, ratingHistory
 
-    const tagStats = [
-      { tag: "implementation", solved_count: 28 },
-      { tag: "math", solved_count: 22 },
-      { tag: "greedy", solved_count: 18 },
-      { tag: "strings", solved_count: 15 },
-    ]
+    if (user.codeforces_handle) {
+      try {
+        const [submissions, ratings] = await Promise.all([
+          withRetry(() => codeforcesAPI.getUserSubmissions(user.codeforces_handle)),
+          withRetry(() => codeforcesAPI.getUserRating(user.codeforces_handle)),
+        ])
 
-    const recentSubmissions = [
-      {
-        problem_id: "1742A",
-        problem_name: "Sum",
-        rating: 800,
-        verdict: "OK",
-        programming_language: "C++17",
-        submitted_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-      },
-    ]
+        // Calculate difficulty stats from real submissions
+        const difficultyCount: Record<string, number> = {}
+        const tagCount: Record<string, number> = {}
 
-    const ratingHistory = [
-      {
-        contest_id: "1742",
-        old_rating: 1200,
-        new_rating: 1247,
-        rank: 1234,
-        participated_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-      },
-    ]
+        submissions.forEach((submission) => {
+          if (submission.verdict === "OK" && submission.problem) {
+            const rating = submission.problem.rating || 800
+            const difficulty = getDifficultyLevel(rating)
+            difficultyCount[difficulty] = (difficultyCount[difficulty] || 0) + 1
+
+            submission.problem.tags?.forEach((tag) => {
+              tagCount[tag] = (tagCount[tag] || 0) + 1
+            })
+          }
+        })
+
+        difficultyStats = Object.entries(difficultyCount).map(([difficulty, count]) => ({
+          difficulty,
+          solved_count: count,
+        }))
+
+        tagStats = Object.entries(tagCount)
+          .sort(([, a], [, b]) => b - a)
+          .slice(0, 10)
+          .map(([tag, count]) => ({
+            tag,
+            solved_count: count,
+          }))
+
+        // Get recent submissions (last 10 AC submissions)
+        recentSubmissions = submissions
+          .filter((s) => s.verdict === "OK")
+          .slice(-10)
+          .reverse()
+          .map((submission) => ({
+            problem_id: `${submission.problem.contestId}-${submission.problem.index}`,
+            problem_name: submission.problem.name,
+            rating: submission.problem.rating,
+            verdict: submission.verdict,
+            programming_language: submission.programmingLanguage,
+            submitted_at: new Date(submission.creationTimeSeconds * 1000).toISOString(),
+          }))
+
+        // Transform rating history
+        ratingHistory = ratings.slice(-20).map((rating) => ({
+          contest_id: rating.contestId?.toString(),
+          old_rating: rating.oldRating,
+          new_rating: rating.newRating,
+          rank: rating.rank,
+          participated_at: new Date(rating.ratingUpdateTimeSeconds * 1000).toISOString(),
+        }))
+      } catch (error) {
+        console.error("Failed to fetch Codeforces data:", error)
+        // Return basic stats without detailed Codeforces data
+        difficultyStats = []
+        tagStats = []
+        recentSubmissions = []
+        ratingHistory = []
+      }
+    } else {
+      // User hasn't verified Codeforces handle
+      difficultyStats = []
+      tagStats = []
+      recentSubmissions = []
+      ratingHistory = []
+    }
 
     return NextResponse.json({
       user: {
@@ -84,6 +145,7 @@ export async function GET() {
       tagStats,
       recentSubmissions,
       ratingHistory,
+      hasCodeforcesHandle: !!user.codeforces_handle,
     })
   } catch (error) {
     console.error("Stats fetch error:", error)
@@ -92,4 +154,15 @@ export async function GET() {
       { status: 500 },
     )
   }
+}
+
+function getDifficultyLevel(rating: number): string {
+  if (rating < 1000) return "Beginner"
+  if (rating < 1300) return "Pupil"
+  if (rating < 1600) return "Specialist"
+  if (rating < 1900) return "Expert"
+  if (rating < 2100) return "Candidate Master"
+  if (rating < 2300) return "Master"
+  if (rating < 2400) return "International Master"
+  return "Grandmaster"
 }
